@@ -114,7 +114,7 @@ if __name__ == '__main__':
         raise ValueError('No obstacle type specified')
 
     if 'double_integrator' in args.env:
-        env = DoubleIntegratorEnv(world_dim=world_dim, world_type=obstacles, dt=0.05, action_noise_cov=0.5*np.eye(world_dim))
+        env = DoubleIntegratorEnv(world_dim=world_dim, world_type=obstacles, dt=0.05, action_noise_cov=0.1*np.eye(world_dim))
         # generative_model = DoubleIntegratorModel(world_dim=2).to(device=args.device)
         control_dim = 2
         state_dim = 4

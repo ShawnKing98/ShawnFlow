@@ -4,13 +4,16 @@ from flow_mpc import flows
 
 
 class RealNVPModel(nn.Module):
-    def __init__(self, state_dim, action_dim, horizon):
+    def __init__(self, state_dim, action_dim, horizon, hidden_dim=256, flow_length=10, condition=True):
         super(RealNVPModel, self).__init__()
-        self.flow = self.build_nvp_flow(state_dim * horizon, state_dim + action_dim * horizon)
-        self.conditional_prior = flows.ConditionalPrior(state_dim + action_dim * horizon, state_dim * horizon)
+        self.flow = self.build_nvp_flow(state_dim * horizon, state_dim + action_dim * horizon, flow_length=flow_length, hidden_dim=hidden_dim)
+        if condition:
+            self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon, state_dim * horizon)
+        else:
+            self.prior = flows.GaussianPrior(state_dim * horizon)
 
     @staticmethod
-    def build_nvp_flow(flow_dim, context_dim, flow_length=8):
+    def build_nvp_flow(flow_dim, context_dim, flow_length, hidden_dim):
         """
         Build a flow
         :param flow_dim: the dimension of variables to be flowed
@@ -20,13 +23,15 @@ class RealNVPModel(nn.Module):
         """
         flow_list = []
         for _ in range(flow_length):
-            flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=64))
-            # flow_list.append(flows.BatchNormFlow(flow_dim))
+            # flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
+            flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
+            flow_list.append(flows.BatchNormFlow(flow_dim))
             # flow_list.append(flows.LULinear(flow_dim, context_dim=context_dim))
 
             # flow_list.append(flows.LULinear(flow_dim))
             flow_list.append(flows.RandomPermutation(features=flow_dim))
-        flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=64))
+        flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
+        # flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
         return flows.SequentialFlow(flow_list)
 
     def forward(self, start_state: torch.Tensor, action: torch.Tensor, reverse=False, traj=None):
@@ -45,11 +50,13 @@ class RealNVPModel(nn.Module):
         state_dim = start_state.shape[1]
         context = torch.cat((start_state, action.reshape(batch_size, -1)), dim=1)
         if not reverse: # sampling
-            z, log_prob = self.conditional_prior(z=None, logpx=0, context=context, reverse=reverse)
+            z, log_prob = self.prior(z=None, logpx=0, context=context, reverse=reverse)
             x, ldj = self.flow(z, logpx=0, context=context, reverse=reverse)
+            # x, ldj = z, 0
             return x.reshape(batch_size, -1, state_dim), log_prob + ldj
-        else:
+        else:           # training
             x = traj.reshape(batch_size, -1)
             z, ldj = self.flow(x, logpx=0, context=context, reverse=reverse)
-            z, log_prob = self.conditional_prior(z=z, logpx=ldj, context=context, reverse=reverse)
+            # z, ldj = x, 0
+            z, log_prob = self.prior(z=z, logpx=ldj, context=context, reverse=reverse)
             return z, log_prob

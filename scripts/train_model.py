@@ -1,4 +1,6 @@
 import argparse
+import json
+import os
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import torch
@@ -12,13 +14,18 @@ from flow_mpc import utils
 from visualise_flow_training import visualize_flow
 from flow_mpc.environments import DoubleIntegratorEnv
 
+np.random.seed(0)
+torch.manual_seed(0)
+
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', type=int, default=64)
-    parser.add_argument('--epochs', type=int, default=1000)
+    parser.add_argument('--batch-size', type=int, default=512)
+    parser.add_argument('--epochs', type=int, default=7000)
     parser.add_argument('--print-epochs', type=int, default=5)
     parser.add_argument('--horizon', type=int, default=40)
     parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--hidden-dim', type=int, default=256)
+    parser.add_argument('--flow-length', type=int, default=10)
     # parser.add_argument('--use-true-grad', action='store_true')
     parser.add_argument('--disable-flow', action='store_true')
     parser.add_argument('--device', type=str, default='cuda:0')
@@ -26,10 +33,12 @@ def parse_arguments():
     # parser.add_argument('--logging', action='store_true')
     # parser.add_argument('--name', type=str, required=True)
     # parser.add_argument('--use-vae', action='store_true')
-    parser.add_argument('--data-file', type=str, default='../data/no_obs_2d_inter_action_noise.npz')
+    parser.add_argument('--data-file', type=str, default='../data/2d-integrator-no-obs-0-action-noise.npz', help="training data")
+    parser.add_argument('--action-noise', type=float, default=0.0)
     parser.add_argument('--train-val-ratio', type=int, default=0.8)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow'], default='nvp')
-    parser.add_argument('--name', type=str, default='test', help="name of this trial")
+    parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
+    parser.add_argument('--name', type=str, default='0_action_noise_10_layer_conditional_prior', help="name of this trial")
     # parser.add_argument('--vae-flow-prior', action='store_true')
     # parser.add_argument('--supervised', action='store_true')
     # parser.add_argument('--load-vae', type=str, default=None)
@@ -43,6 +52,10 @@ def parse_arguments():
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
         print(f"{arg}: {value}")
+    if not os.path.exists("runs/" + args.name):
+        os.makedirs("runs/" + args.name)
+    with open("runs/" + args.name + "/args.txt", 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
     return args
 
 
@@ -90,12 +103,12 @@ def eval_model(model, dataloader, args):
 
 
 if __name__ == "__main__":
-    writer = SummaryWriter()
     args = parse_arguments()
+    writer = SummaryWriter(log_dir="runs/" + args.name)
     if args.disable_flow:
         model = NaiveMLPModel(state_dim=4, action_dim=2, horizon=args.horizon).double()
     elif args.flow_type == 'nvp':
-        model = flows.RealNVPModel(state_dim=4, action_dim=2, horizon=args.horizon).double()
+        model = flows.RealNVPModel(state_dim=4, action_dim=2, horizon=args.horizon, hidden_dim=args.hidden_dim, flow_length=args.flow_length).double()
     else:
         raise NotImplementedError
     model.to(args.device)
@@ -106,7 +119,8 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(data_list[0:train_val_split], batch_size=args.batch_size, shuffle=True)
     validate_dataloader = DataLoader(data_list[train_val_split:], batch_size=args.batch_size, shuffle=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    env = DoubleIntegratorEnv(world_dim=2, world_type='spheres', dt=0.05, action_noise_cov=0.5*np.eye(2))
+    env = DoubleIntegratorEnv(world_dim=2, world_type='spheres', dt=0.05, action_noise_cov=args.action_noise*np.eye(2))
+
     visualize_flow(env, model)
     for epoch in range(args.epochs):
         for data in train_dataloader:
@@ -124,9 +138,15 @@ if __name__ == "__main__":
             optimizer.step()
             writer.add_scalar('epoch/train loss', loss, epoch)
         if epoch % args.print_epochs == 0:
-            visualize_flow(env, model)
+            dist, std_true, std_pred, prior_std = visualize_flow(env, model, dist_type=args.dist_metric, title=args.name)
+            prior_std = prior_std.mean()
+            writer.add_scalar('epoch/trajectory prediction error', dist, epoch)
+            writer.add_scalar('epoch/true traj std', std_true, epoch)
+            writer.add_scalar('epoch/pred traj std', std_pred, epoch)
+            writer.add_scalar('epoch/prior std', prior_std, epoch)
             test_loss = eval_model(model, validate_dataloader, args)
             writer.add_scalar('epoch/test loss', test_loss, epoch)
-            print(f"epoch: {epoch} | test loss: {test_loss:.3g} | train loss: {loss:.3g}")
+            print(f"epoch: {epoch} | test loss: {test_loss:.3g} | train loss: {loss:.3g} | prediction error: {dist:.3g} " +
+                  f"| true traj std: {std_true} | pred traj std: {std_pred} | prior std: {prior_std}")
     writer.close()
     utils.save_checkpoint(model, optimizer, f"../data/{args.name}.pth")

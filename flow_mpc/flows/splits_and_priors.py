@@ -1,7 +1,9 @@
 import torch
 from torch import nn
-from torch.nn import functional as F
+import numpy as np
+from torch.nn import functional as F, init
 from torch.distributions.normal import Normal
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 
 class SqueezeFlow(nn.Module):
@@ -37,6 +39,60 @@ class SqueezeVoxelFlow(nn.Module):
             z = z.reshape(B, C // 8, D * 2, H * 2, W * 2)
         return z, logpx
 
+class GaussianPrior(nn.Module):
+    """
+    A Gaussian prior with mean and covariance being parameterized, the parameterization of covariance matrix is by Cholesky decomposition
+    """
+    def __init__(self, z_dim, eps=1e-3, identity_init=True):
+        super(GaussianPrior, self).__init__()
+        self.z_dim = z_dim
+        self.eps = eps
+
+        self.lower_indices = np.tril_indices(z_dim, k=-1)
+        self.diag_indices = np.diag_indices(z_dim)
+
+        n_triangular_entries = ((z_dim - 1) * z_dim) // 2
+
+        self.mu = nn.Parameter(torch.zeros(z_dim))
+        self.lower_entries = nn.Parameter(torch.zeros(n_triangular_entries))
+        self.unconstrained_diag = nn.Parameter(torch.zeros(z_dim))
+
+        self._initialize(identity_init)
+
+    def _initialize(self, identity_init):
+        init.zeros_(self.mu)
+        if identity_init:
+            init.zeros_(self.lower_entries)
+            constant = np.log(np.exp(1 - self.eps) - 1)
+            init.constant_(self.unconstrained_diag, constant)
+        else:
+            stdv = 1.0 / np.sqrt(self.features)
+            init.uniform_(self.lower_entries, -stdv, stdv)
+            init.uniform_(self.unconstrained_diag, -stdv, stdv)
+
+    @property
+    def diag(self):
+        return F.softplus(self.unconstrained_diag) + self.eps
+
+    @property
+    def std(self):
+        lower = self.lower_entries.new_zeros(self.z_dim, self.z_dim)
+        lower[self.lower_indices[0], self.lower_indices[1]] = self.lower_entries
+        lower[self.diag_indices[0], self.diag_indices[1]] = self.diag
+
+        return lower @ lower.t()
+
+    def forward(self, z, logpx, context, reverse=False):
+        batch_size = context.shape[0]
+        # z_mu, z_std = self.mu, self.std
+        z_mu, z_std = torch.zeros(160, device='cuda', dtype=torch.double), torch.eye(160, device='cuda', dtype=torch.double)
+        prior = MultivariateNormal(z_mu, z_std)
+        if not reverse:
+            if z is None:
+                z = prior.rsample((batch_size,))
+
+        logpx = logpx + prior.log_prob(z)
+        return z, logpx
 
 class ConditionalPrior(nn.Module):
 
@@ -48,7 +104,7 @@ class ConditionalPrior(nn.Module):
 
     def forward(self, z, logpx, context, reverse=False):
         z_mu, z_std = torch.chunk(self.fc2(self.act_fn(self.fc1(context))), chunks=2, dim=1)
-        z_std = torch.sigmoid(z_std) + 1e-2
+        z_std = torch.sigmoid(z_std) + 1e-7
 
         prior = Normal(z_mu, z_std)
         if not reverse:
