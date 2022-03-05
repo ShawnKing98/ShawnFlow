@@ -4,16 +4,16 @@ from flow_mpc import flows
 
 
 class RealNVPModel(nn.Module):
-    def __init__(self, state_dim, action_dim, horizon, hidden_dim=256, flow_length=10, condition=True):
+    def __init__(self, state_dim, action_dim, horizon, hidden_dim=256, flow_length=10, condition=True, initialized=False):
         super(RealNVPModel, self).__init__()
-        self.flow = self.build_nvp_flow(state_dim * horizon, state_dim + action_dim * horizon, flow_length=flow_length, hidden_dim=hidden_dim)
+        self.flow = self.build_nvp_flow(state_dim * horizon, state_dim + action_dim * horizon, flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
         if condition:
             self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon, state_dim * horizon)
         else:
             self.prior = flows.GaussianPrior(state_dim * horizon)
 
     @staticmethod
-    def build_nvp_flow(flow_dim, context_dim, flow_length, hidden_dim):
+    def build_nvp_flow(flow_dim, context_dim, flow_length, hidden_dim, initialized=False):
         """
         Build a flow
         :param flow_dim: the dimension of variables to be flowed
@@ -25,7 +25,8 @@ class RealNVPModel(nn.Module):
         for _ in range(flow_length):
             # flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
             flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-            flow_list.append(flows.BatchNormFlow(flow_dim))
+            flow_list.append(flows.ActNorm(flow_dim, initialized=initialized))
+            # flow_list.append(flows.BatchNormFlow(flow_dim))
             # flow_list.append(flows.LULinear(flow_dim, context_dim=context_dim))
 
             # flow_list.append(flows.LULinear(flow_dim))

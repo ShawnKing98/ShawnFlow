@@ -110,8 +110,11 @@ class ConditionalPrior(nn.Module):
         if not reverse:
             if z is None:
                 z = prior.rsample()
-
+        # try:
         logpx = logpx + prior.log_prob(z).sum(dim=1)
+        # except:
+        #     import ipdb
+        #     ipdb.set_trace()
         return z, logpx
 
 

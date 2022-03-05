@@ -4,6 +4,6 @@ from .lu import LULinear
 from .permutation import RandomPermutation
 from .batchnorm import BatchNormFlow
 from .glow_layers import ActNorm
-from .splits_and_priors import ConditionalPrior
+from .splits_and_priors import ConditionalPrior, GaussianPrior
 from .sequential import SequentialFlow
 from .realNVP import RealNVPModel

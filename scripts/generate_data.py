@@ -28,9 +28,6 @@ def parse_args():
 def generate_planning_dataset(env, num_environments, samples_per_env, controller=None):
     data = {}
     data['starts'] = []
-    data['goals'] = []
-    data['sdf'] = []
-    data['sdf_grad'] = []
     data['states'] = []
     if controller is not None:
         data['U'] = []
@@ -76,9 +73,6 @@ def generate_planning_dataset(env, num_environments, samples_per_env, controller
         if success:
             i += 1
             data['starts'].append(np.stack(starts, axis=0))
-            data['goals'].append(np.stack(goals, axis=0))
-            data['sdf'].append(sdf)
-            data['sdf_grad'].append(sdf_grad)
             if controller is not None:
                 data['U'].append(np.stack(control_sequences, axis=0))
                 data['states'].append(np.stack(states, axis=0))

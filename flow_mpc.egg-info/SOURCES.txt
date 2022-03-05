@@ -1,3 +1,4 @@
+README.md
 setup.py
 flow_mpc/__init__.py
 flow_mpc/planning_dataset.py
@@ -25,6 +26,7 @@ flow_mpc/encoders/context_nets.py
 flow_mpc/encoders/env_encoders.py
 flow_mpc/encoders/vae.py
 flow_mpc/environments/__init__.py
+flow_mpc/environments/disk_2d.py
 flow_mpc/environments/double_integrator.py
 flow_mpc/environments/environment.py
 flow_mpc/environments/halton.py

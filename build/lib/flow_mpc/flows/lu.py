@@ -153,5 +153,5 @@ class LULinear(Linear):
         where:
             D = num of features
         """
-        return torch.log()
+        # return torch.log()
         return torch.sum(torch.log(self.upper_diag))

@@ -144,10 +144,10 @@ class ResNetCouplingLayer(nn.Module):
 
         # Affine transformation
         if not reverse:
-            y1 = x[:, self.d:] * torch.exp(scale) + shift
+            y1 = (x[:, self.d:] - shift) * torch.exp(-1 * scale)
             ldj = - ldj
         else:
-            y1 = (x[:, self.d:] - shift) * torch.exp(-1 * scale)
+            y1 = x[:, self.d:] * torch.exp(scale) + shift
 
         y = torch.cat([x[:, :self.d], y1], 1) if not self.swap else torch.cat([y1, x[:, :self.d]], 1)
 

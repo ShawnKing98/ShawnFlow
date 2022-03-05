@@ -37,11 +37,11 @@ class BatchNormFlow(nn.Module):
             mean = self.running_mean
             var = self.running_var
 
-        if reverse:
+        if reverse:     # train
             x_hat = (x - mean) / var.sqrt()
             y = torch.exp(self.log_gamma) * x_hat + self.beta
             ldj = (self.log_gamma - 0.5 * torch.log(var)).sum(-1)
-        else:
+        else:           # test
             x_hat = (x - self.beta) / torch.exp(self.log_gamma)
             y = x_hat * var.sqrt() + mean
             ldj = -(self.log_gamma - 0.5 * torch.log(var)).sum(-1)
