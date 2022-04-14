@@ -48,8 +48,8 @@ def parse_args():
     #                     help="the distance metric between two sets of trajectory")
     # parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
-    args.flow_path = f"../data/flow_model/{args.flow_name}_best.pt"
-    with open(f"./runs/{args.flow_name}/args.txt") as f:
+    args.flow_path = f"../data/flow_model/{args.flow_name}/{args.flow_name}_best.pt"
+    with open(f"../data/flow_model/{args.flow_name}/args.txt") as f:
         stored_args = f.read()
     stored_args = json.loads(stored_args)
     for (k, v) in stored_args.items():

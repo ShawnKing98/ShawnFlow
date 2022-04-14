@@ -1,7 +1,7 @@
 import numpy as np
 
 from flow_mpc.environments.halton import halton
-from sdf_tools import utils_2d, utils_3d
+# from sdf_tools import utils_2d, utils_3d
 
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d

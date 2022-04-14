@@ -50,7 +50,7 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=int, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow'], default='nvp')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='mul_start_flow_2', help="name of this trial")
+    parser.add_argument('--name', type=str, default='test', help="name of this trial")
     # parser.add_argument('--vae-flow-prior', action='store_true')
     # parser.add_argument('--supervised', action='store_true')
     # parser.add_argument('--load-vae', type=str, default=None)
@@ -64,9 +64,9 @@ def parse_arguments():
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
         print(f"{arg}: {value}")
-    if not os.path.exists("runs/" + args.name):
-        os.makedirs("runs/" + args.name)
-    with open("runs/" + args.name + "/args.txt", 'w') as f:
+    if not os.path.exists("../data/flow_model/" + args.name):
+        os.makedirs("../data/flow_model/" + args.name)
+    with open("../data/flow_model/" + args.name + "/args.txt", 'w') as f:
         json.dump(args.__dict__, f, indent=2)
     return args
 
@@ -242,11 +242,11 @@ if __name__ == "__main__":
             writer.add_scalar('epoch/prior log std', prior_std, epoch)
             test_loss = eval_model(model, validate_dataloader, args)
             writer.add_scalar('epoch/test loss', test_loss, epoch)
-            utils.save_checkpoint(model, optimizer, f"../data/flow_model/{args.name}.pt")
+            utils.save_checkpoint(model, optimizer, f"../data/flow_model/{args.name}/{args.name}.pt")
             print(f"epoch: {epoch} | test loss: {test_loss:.3g} | train loss: {train_loss:.3g} "
                   + f"| prediction error: {dist:.3g} | true traj std: {std_true} | pred traj std: {std_pred} | prior log std: {prior_std}")
             if dist < best_dist:
                 best_dist = dist
-                utils.save_checkpoint(model, optimizer, f"../data/flow_model/{args.name}_best.pt")
+                utils.save_checkpoint(model, optimizer, f"../data/flow_model/{args.name}/{args.name}_best.pt")
     writer.close()
     # ipdb.set_trace()
