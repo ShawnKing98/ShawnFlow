@@ -8,7 +8,7 @@ class RandomController:
     """
     def __init__(self, udim: int, urange: float, horizon: int, sigma: float=10, lower_bound: list=None, upper_bound: list=None):
         """
-
+        Initialization.
         :param udim: the dimension of actions
         :param urange: the range of actions
         :param horizon: the control horizon

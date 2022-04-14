@@ -2,4 +2,4 @@
 from .double_integrator import DoubleIntegratorEnv
 # from .kuka_arm import KukaEnv
 # from .victor_tabletop import VictorEnv
-from .disk_2d import NavigationFixObstacle
+from .disk_2d import NavigationObstacle

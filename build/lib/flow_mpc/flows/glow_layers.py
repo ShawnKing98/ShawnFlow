@@ -15,7 +15,7 @@ class ActNorm(nn.Module):
         self.initialized = initialized
 
     def forward(self, x, context=None, logpx=None, reverse=False):
-        if self.initialized == False:
+        if self.training and reverse and not self.initialized:
             self.weight.data.copy_(torch.log(1.0 / (x.std(0) + 1e-12)))
             self.bias.data.copy_(x.mean(0))
             self.initialized = True

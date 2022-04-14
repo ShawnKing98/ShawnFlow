@@ -5,6 +5,7 @@ from flow_mpc.flows.image_flows import ImageFlow
 from flow_mpc.flows.voxel_flows import VoxelFlow
 from flow_mpc.encoders.vae import VAE
 from torch.distributions.normal import Normal
+from typing import Tuple
 
 
 class BaseEncoder(nn.Module):
@@ -24,26 +25,29 @@ class BaseEncoder(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, context_dim, z_env_dim):
-        super(self).__init__()
-        self.environment_image_embedding_size = 512
+    def __init__(self, image_size: Tuple[int, int], z_env_dim):
+        super(Encoder, self).__init__()
+        self.image_size = image_size
         # convolutons for environments image
-        self.conv1 = nn.Conv2d(1, 32, 3, stride=2)
-        self.conv2 = nn.Conv2d(32, 32, 3, stride=2)
-        self.conv3 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
-        self.fc_image_reduction = nn.Linear(2048, z_env_dim)
-        self.act_fn = F.relu
-        self.context_dim = context_dim
+        self.net = []
+        self.net.append(nn.Conv2d(1, 32, 3, stride=1, padding=1))
+        self.net.append(nn.ReLU())
+        self.net.append(nn.Conv2d(32, 32, 3, stride=1, padding=1))
+        self.net.append(nn.ReLU())
+        self.net.append(nn.MaxPool2d(2, 2))
+        self.net.append(nn.Conv2d(32, 64, 3, stride=1, padding=1))
+        self.net.append(nn.ReLU())
+        self.net.append(nn.Conv2d(64, 64, 3, stride=1, padding=1))
+        self.net.append(nn.ReLU())
+        self.net.append(nn.MaxPool2d(2, 2))
+        self.net.append(nn.Flatten())
+        self.net.append(nn.Linear(4*image_size[0]*image_size[1], 256))
+        self.net.append(nn.ReLU())
+        self.net.append(nn.Linear(256, z_env_dim))
+        self.net = nn.Sequential(*self.net)
 
-    def encode(self, environment):
-        h_env = self.act_fn(self.conv1(environment))
-        h_env = self.act_fn(self.conv2(h_env))
-        h_env = self.act_fn(self.conv3(h_env)).reshape(-1, 2048)
-        h_env = self.act_fn(self.fc_image_reduction(h_env))
-
-        return {
-            'h_environment', h_env
-        }
+    def encode(self, image):
+        return self.net(image)
 
 
 class EnsembleEncoder(nn.Module):

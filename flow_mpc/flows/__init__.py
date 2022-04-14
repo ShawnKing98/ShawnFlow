@@ -6,4 +6,4 @@ from .batchnorm import BatchNormFlow
 from .glow_layers import ActNorm
 from .splits_and_priors import ConditionalPrior, GaussianPrior
 from .sequential import SequentialFlow
-from .realNVP import RealNVPModel
+from .realNVP import RealNVPModel, ImageRealNVPModel

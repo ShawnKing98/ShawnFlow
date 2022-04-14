@@ -107,12 +107,15 @@ class ResNetCouplingLayer(nn.Module):
         '''self.net_s_t = ResNetBlock(self.d + context_dim, self.d*2, intermediate_dim)'''
 
         nonlinearity_name = 'relu' if nonlinearity == 'ReLu' else 'tanh'
-        nn.init.xavier_uniform_(self.net_s_t[0].weight,
-                                gain=nn.init.calculate_gain(nonlinearity_name)/10)
-        nn.init.xavier_uniform_(self.net_s_t[3].weight,
-                                gain=nn.init.calculate_gain(nonlinearity_name)/10)
-        nn.init.xavier_uniform_(self.net_s_t[6].weight,
-                                gain=nn.init.calculate_gain('linear')/10)
+        nn.init.kaiming_normal_(self.net_s_t[0].weight, nonlinearity=nonlinearity_name)
+        nn.init.kaiming_normal_(self.net_s_t[3].weight, nonlinearity=nonlinearity_name)
+        nn.init.kaiming_normal_(self.net_s_t[6].weight, nonlinearity='linear')
+        # nn.init.xavier_uniform_(self.net_s_t[0].weight,
+        #                         gain=nn.init.calculate_gain(nonlinearity_name)/10)
+        # nn.init.xavier_uniform_(self.net_s_t[3].weight,
+        #                         gain=nn.init.calculate_gain(nonlinearity_name)/10)
+        # nn.init.xavier_uniform_(self.net_s_t[6].weight,
+        #                         gain=nn.init.calculate_gain('linear')/10)
 
     def forward(self, x, context=None, logpx=None, reverse=False):
         start = time.time()
@@ -184,3 +187,71 @@ class MaxLayer(nn.Module):
         if logpx is not None:
             logpx = logpx + ldj
         return z, logpx
+
+
+class RationalQuadraticSplineCouplingLayer(nn.Module):
+    """
+    Neural spline flow coupling layer, wrapper for the implementation
+    of Durkan et al., see https://github.com/bayesiains/nsf
+    """
+    def __init__(
+            self,
+            d,
+            intermediate_dim=128,
+            context_dim=0,
+            swap=False,
+            nonlinearity='ReLu',
+            num_bins=8,
+            tail_bound=3
+    ):
+        """
+        Constructor
+        :param num_input_channels: Flow dimension
+        :type num_input_channels: Int
+        :param num_blocks: Number of residual blocks of the parameter NN
+        :type num_blocks: Int
+        :param num_hidden_channels: Number of hidden units of the NN
+        :type num_hidden_channels: Int
+        :param num_bins: Number of bins
+        :type num_bins: Int
+        :param tail_bound: Bound of the spline tails
+        :type tail_bound: Int
+        :param activation: Activation function
+        :type activation: torch module
+        :param dropout_probability: Dropout probability of the NN
+        :type dropout_probability: Float
+        :param reverse_mask: Flag whether the reverse mask should be used
+        :type reverse_mask: Boolean
+        :param reverse: Flag whether forward and backward pass shall be swapped
+        :type reverse: Boolean
+        """
+        super().__init__()
+        self.net_s_t = nn.Sequential(
+            nn.Linear(self.d + context_dim, intermediate_dim),
+            nn.BatchNorm1d(intermediate_dim),
+            self.nonlinearity,
+            nn.Linear(intermediate_dim, intermediate_dim),
+            nn.BatchNorm1d(intermediate_dim),
+            self.nonlinearity,
+            nn.Linear(intermediate_dim, (d - self.d) * 2),
+        )
+        '''self.net_s_t = ResNetBlock(self.d + context_dim, self.d*2, intermediate_dim)'''
+
+        nonlinearity_name = 'relu' if nonlinearity == 'ReLu' else 'tanh'
+        nn.init.kaiming_normal_(self.net_s_t[0].weight, nonlinearity=nonlinearity_name)
+        nn.init.kaiming_normal_(self.net_s_t[3].weight, nonlinearity=nonlinearity_name)
+        nn.init.kaiming_normal_(self.net_s_t[6].weight, nonlinearity='linear')
+
+    def forward(self, z):
+        if self.reverse:
+            z, log_det = self.prqct.inverse(z)
+        else:
+            z, log_det = self.prqct(z)
+        return z, log_det.view(-1)
+
+    def inverse(self, z):
+        if self.reverse:
+            z, log_det = self.prqct(z)
+        else:
+            z, log_det = self.prqct.inverse(z)
+        return z, log_det.view(-1)
