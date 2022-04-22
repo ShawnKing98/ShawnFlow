@@ -19,7 +19,7 @@ from dm_control.composer import Environment
 from flow_mpc.environments import NavigationObstacle
 from flow_mpc.environments import DoubleIntegratorEnv
 from flow_mpc.controllers import RandomController
-from flow_mpc.flows import RealNVPModel, ImageRealNVPModel, ConditionalPrior, GaussianPrior
+from flow_mpc.flows import *
 from flow_mpc import utils
 from frechetdist import frdist
 
@@ -31,8 +31,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument('--name', type=str, required=True)
     parser.add_argument('--test-num', type=int, default=10)
-    parser.add_argument('--trial-num', type=int, default=50)
-    parser.add_argument('--flow-name', type=str, default="mul_start_flow_2")
+    parser.add_argument('--trial-num', type=int, default=5)
+    parser.add_argument('--flow-name', type=str, default="autoregressive_4")
     # parser.add_argument('--data-file', type=str, default='../data/training_traj/single_disk_2d_env_2/single_disk_2d_env_2.npz')
     # parser.add_argument('--condition-prior', type=bool, default=True)
     parser.add_argument('--action-noise', type=float, default=0.1)
@@ -56,9 +56,9 @@ def parse_args():
         # if getattr(args, k, None) is None:
         setattr(args, k, v)
     args.dist_metric = 'L2'
+    # args.data_file = "../data/training_traj/mul_start_disk_2d_env_3/mul_start_disk_2d_env_3.npz"
     for (arg, value) in args._get_kwargs():
         print(f"{arg}: {value}")
-    # ipdb.set_trace()
     return args
 
 
@@ -95,7 +95,7 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
         prior_std = np.zeros(1)
     elif isinstance(prior, ConditionalPrior):
         context = torch.cat((start_tensor, action.reshape(1, -1)), dim=1)
-        if isinstance(flow, ImageRealNVPModel):
+        if isinstance(flow, ImageFlowModel):
             env_code = flow.encoder.encode(image)
             s_u_code = flow.s_u_encoder(context)
             context = torch.cat((s_u_code, env_code), dim=1)
@@ -128,9 +128,9 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
     for i in range(test_num):
         # ipdb.set_trace()
         with torch.no_grad():
-            if isinstance(flow, RealNVPModel):
+            if isinstance(flow, FlowModel):
                 pred_traj = flow(start_tensor, action)[0][:, :, 0:2]
-            elif isinstance(flow, ImageRealNVPModel):
+            elif isinstance(flow, ImageFlowModel):
                 pred_traj = flow(start_tensor, action, image)[0][:, :, 0:2]
         pred_traj_history = torch.cat((pred_traj_history, pred_traj), dim=0)
         pred_traj = pred_traj.squeeze(0).cpu().detach().numpy()
@@ -228,7 +228,7 @@ def visualize_flow_mujoco(env: dm_control.composer.environment.Environment,
         prior_std = np.zeros(1)
     elif isinstance(prior, ConditionalPrior):
         context = torch.cat((start_tensor, action.reshape(1, -1)), dim=1)
-        if isinstance(flow, ImageRealNVPModel):
+        if isinstance(flow, ImageFlowModel):
             env_code = flow.encoder.encode(image)
             s_u_code = flow.s_u_encoder(context)
             context = torch.cat((s_u_code, env_code), dim=1)
@@ -279,9 +279,9 @@ def visualize_flow_mujoco(env: dm_control.composer.environment.Environment,
     for i in range(test_num):
         # ipdb.set_trace()
         with torch.no_grad():
-            if isinstance(flow, RealNVPModel):
+            if isinstance(flow, FlowModel):
                 pred_traj = flow(start_tensor, action)[0][:, :, 0:2]
-            elif isinstance(flow, ImageRealNVPModel):
+            elif isinstance(flow, ImageFlowModel):
                 pred_traj = flow(start_tensor, action, image)[0][:, :, 0:2]
         pred_traj_history = torch.cat((pred_traj_history, pred_traj), dim=0)
         pred_traj = pred_traj.squeeze(0).cpu().detach().numpy()
@@ -457,7 +457,7 @@ if __name__ == "__main__":
     import time
     # environment
     env = DoubleIntegratorEnv(world_dim=args.world_dim, world_type='spheres', dt=0.05, action_noise_cov=args.action_noise*np.eye(args.world_dim))
-    env_mujoco = Environment(NavigationObstacle(process_noise=args.process_noise, action_noise=args.action_noise, fixed_obstacle=True), max_reset_attempts=2)
+    env_mujoco = Environment(NavigationObstacle(process_noise=args.process_noise, action_noise=args.action_noise, fixed_obstacle=False), max_reset_attempts=2)
     data_tuple = dict(np.load(args.data_file))
     data_tuple = tuple(data_tuple.values())
     # env_mujoco = Environment(
@@ -467,9 +467,12 @@ if __name__ == "__main__":
     controller = RandomController(udim=args.control_dim, urange=10, horizon=args.horizon, lower_bound=[-10, -10], upper_bound=[10, 10])
     # flow model
     if not args.with_image:
-        model = RealNVPModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length, initialized=True).float().to(args.device)
+        model = FlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, hidden_dim=args.hidden_dim,
+                          condition=args.condition_prior, flow_length=args.flow_length, initialized=True, flow_type=args.flow_type).float().to(args.device)
     else:
-        model = ImageRealNVPModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128), hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length, initialized=True).float().to(args.device)
+        model = ImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
+                               hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
+                               initialized=True, flow_type=args.flow_type).float().to(args.device)
     utils.load_checkpoint(model, filename=args.flow_path)
     model.eval()
     dist_list = []

@@ -29,12 +29,12 @@ torch.manual_seed(0)
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, default=2**2)
-    parser.add_argument('--epochs', type=int, default=10000)
+    parser.add_argument('--epochs', type=int, default=5000)
     parser.add_argument('--print-epochs', type=int, default=20)
     parser.add_argument('--condition-prior', action='store_true')
     parser.add_argument('--with-image', type=bool, default=True)
     parser.add_argument('--horizon', type=int, default=10)
-    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--lr', type=float, default=5e-3)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--flow-length', type=int, default=10)
     # parser.add_argument('--use-true-grad', action='store_true')
@@ -44,13 +44,13 @@ def parse_arguments():
     # parser.add_argument('--logging', action='store_true')
     # parser.add_argument('--name', type=str, required=True)
     # parser.add_argument('--use-vae', action='store_true')
-    parser.add_argument('--data-file', type=str, default='../data/training_traj/mul_start_disk_2d_env_2/mul_start_disk_2d_env_2.npz', help="training data")
+    parser.add_argument('--data-file', type=str, default='../data/training_traj/single_disk_2d_env/single_disk_2d_env.npz', help="training data")
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--train-val-ratio', type=int, default=0.95)
-    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow'], default='nvp')
+    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='test', help="name of this trial")
+    parser.add_argument('--name', type=str, default='autoregressive_4', help="name of this trial")
     # parser.add_argument('--vae-flow-prior', action='store_true')
     # parser.add_argument('--supervised', action='store_true')
     # parser.add_argument('--load-vae', type=str, default=None)
@@ -109,7 +109,7 @@ def train_model(model, dataloader, args):
             t2 = time.time()
             loss_fn = nn.MSELoss()
             loss = loss_fn(model(start_state, action), traj)
-        elif isinstance(model, flows.RealNVPModel):
+        elif isinstance(model, flows.FlowModel):
             start_state, traj, action = data
             start_state = start_state.squeeze(1).to(args.device)
             traj = traj.to(args.device)
@@ -119,7 +119,7 @@ def train_model(model, dataloader, args):
             z, log_prob = model(start_state, action, reverse=True, traj=traj)
             t3 = time.time()
             loss = -log_prob.mean()
-        elif isinstance(model, flows.ImageRealNVPModel):
+        elif isinstance(model, flows.ImageFlowModel):
             start_state, traj, action, image = data
             N = start_state.shape[1]
             start_state = start_state.reshape(-1, *start_state.shape[-1:]).to(args.device)
@@ -133,6 +133,7 @@ def train_model(model, dataloader, args):
             loss = -log_prob.mean()
         optimizer.zero_grad()
         loss.backward()
+
         optimizer.step()
         t4 = time.time()
         tt = np.array([t0, t1, t2, t3, t4])
@@ -155,7 +156,7 @@ def eval_model(model, dataloader, args):
             action = action.to(args.device)
             loss_fn = nn.MSELoss()
             loss.append(loss_fn(model(start_state, action), traj))
-        elif isinstance(model, flows.RealNVPModel):
+        elif isinstance(model, flows.FlowModel):
             start_state, traj, action = data
             start_state = start_state.squeeze(1).to(args.device)
             traj = traj.to(args.device)
@@ -163,7 +164,7 @@ def eval_model(model, dataloader, args):
             with torch.no_grad():
                 z, log_prob = model(start_state, action, reverse=True, traj=traj)
                 loss.append(-log_prob.mean().item())
-        elif isinstance(model, flows.ImageRealNVPModel):
+        elif isinstance(model, flows.ImageFlowModel):
             start_state, traj, action, image = data
             N = start_state.shape[1]
             start_state = start_state.reshape(-1, *start_state.shape[-1:]).to(args.device)
@@ -190,15 +191,15 @@ if __name__ == "__main__":
     if 'views' in data_dict.keys():
         image_mean = data_dict['views'].mean()
         image_std = data_dict['views'].std()
-    data_list = list(zip(*data_dict.values()))
-    train_val_split = int(args.train_val_ratio * len(data_list))
-    train_data_tuple = tuple(zip(*data_list[0:train_val_split]))
-    val_data_tuple = tuple(zip(*data_list[train_val_split:]))
-    train_data_tuple = tuple(np.array(data) for data in train_data_tuple)
-    val_data_tuple = tuple(np.array(data) for data in val_data_tuple)
-    del data_list
-    # train_data_tuple = tuple(data_dict.values())
-    # val_data_tuple = tuple(data_dict.values())
+    # data_list = list(zip(*data_dict.values()))
+    # train_val_split = int(args.train_val_ratio * len(data_list))
+    # train_data_tuple = tuple(zip(*data_list[0:train_val_split]))
+    # val_data_tuple = tuple(zip(*data_list[train_val_split:]))
+    # train_data_tuple = tuple(np.array(data) for data in train_data_tuple)
+    # val_data_tuple = tuple(np.array(data) for data in val_data_tuple)
+    # del data_list
+    train_data_tuple = tuple(data_dict.values())
+    val_data_tuple = tuple(data_dict.values())
     if not args.with_image:
         train_dataloader = DataLoader(TrajectoryDataset(train_data_tuple, args.horizon), batch_size=args.batch_size, shuffle=True, num_workers=8)
         validate_dataloader = DataLoader(TrajectoryDataset(val_data_tuple, args.horizon), batch_size=args.batch_size, shuffle=True, num_workers=8)
@@ -211,15 +212,15 @@ if __name__ == "__main__":
     # del val_data_tuple
     if args.disable_flow:
         model = NaiveMLPModel(state_dim=4, action_dim=2, horizon=args.horizon)
-    elif args.flow_type == 'nvp':
-        if not args.with_image:
-            model = flows.RealNVPModel(state_dim=4, action_dim=2, horizon=args.horizon, hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length).float()
-        else:
-            model = flows.ImageRealNVPModel(state_dim=4, action_dim=2, horizon=args.horizon, image_size=(128, 128),
-                                            hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
-                                            state_mean=state_mean, state_std=state_std, action_mean=action_mean, action_std=action_std, image_mean=image_mean, image_std=image_std).float()
     else:
-        raise NotImplementedError
+        if not args.with_image:
+            model = flows.FlowModel(state_dim=4, action_dim=2, horizon=args.horizon, hidden_dim=args.hidden_dim,
+                                    condition=args.condition_prior, flow_length=args.flow_length, flow_type=args.flow_type).float()
+        else:
+            model = flows.ImageFlowModel(state_dim=4, action_dim=2, horizon=args.horizon, image_size=(128, 128),
+                                         hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
+                                         state_mean=state_mean, state_std=state_std, action_mean=action_mean, action_std=action_std,
+                                         image_mean=image_mean, image_std=image_std, flow_type=args.flow_type).float()
     model.to(args.device)
     model.train()
     print(f"The number of the model's trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")

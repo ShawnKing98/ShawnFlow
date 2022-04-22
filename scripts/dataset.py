@@ -28,6 +28,9 @@ class TrajectoryDataset(torch.utils.data.Dataset):
         self.action = torch.tensor(data_tuple[2], dtype=torch.float)
         # self.action = self.action.reshape(-1, *self.action.shape[-2:])          # shape (E, N, horizon, action_dim)
         self.sub_length = sub_length if sub_length is not None else traj.shape[-2]
+        print(f"The shape of full trajectory: {self.full_traj.shape}")
+        print(f"The shape of action: {self.action.shape}")
+        print(f"The length of sub-trajectory: {self.sub_length}")
 
     def __len__(self):
         return len(self.full_traj)

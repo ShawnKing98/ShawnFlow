@@ -6,38 +6,69 @@ from flow_mpc.encoders import Encoder
 from typing import List, Tuple
 
 
-class RealNVPFlow(nn.Module):
-    """The RealNVP flow"""
-    def __init__(self, flow_dim, context_dim, flow_length, hidden_dim, initialized=False):
-        """
-                Build a RealNVP flow
-                :param flow_dim: the dimension of variables to be flowed
-                :param context_dim: the dimension of the conditioning variables
-                :param flow_length: the number of the stacked flow layers
-                :return: a flow
-                """
-        super(RealNVPFlow, self).__init__()
-        flow_list = []
-        for _ in range(flow_length):
-            # flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-            flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-            flow_list.append(flows.ActNorm(flow_dim, initialized=initialized))
-            # flow_list.append(flows.BatchNormFlow(flow_dim))
-            # flow_list.append(flows.LULinear(flow_dim, context_dim=context_dim))
+def build_realnvp_flow(flow_dim, context_dim, flow_length, hidden_dim, initialized=False):
+    """
+    Build a RealNVP flow consisting of multiple layers
+    :param flow_dim: the dimension of variables to be flowed
+    :param context_dim: the dimension of the conditioning variables
+    :param flow_length: the number of the stacked flow layers
+    :return: a RealNVP flow
+    """
+    flow_list = []
+    for _ in range(flow_length):
+        # flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
+        flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
+        flow_list.append(flows.ActNorm(flow_dim, initialized=initialized))
+        # flow_list.append(flows.BatchNormFlow(flow_dim))
+        # flow_list.append(flows.LULinear(flow_dim, context_dim=context_dim))
 
-            # flow_list.append(flows.LULinear(flow_dim))
-            flow_list.append(flows.RandomPermutation(features=flow_dim))
-        if flow_length > 0:
-            flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-        self.flow = flows.SequentialFlow(flow_list)
+        # flow_list.append(flows.LULinear(flow_dim))
+        flow_list.append(flows.RandomPermutation(features=flow_dim))
+    if flow_length > 0:
+        flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
+    return flows.SequentialFlow(flow_list)
 
 
-class RealNVPModel(RealNVPFlow):
-    """The dynamic model based on RealNVP"""
-    def __init__(self, state_dim, action_dim, horizon, hidden_dim=256, flow_length=10, condition=True, initialized=False):
-        super(RealNVPModel, self).__init__(flow_dim=state_dim * horizon,
+def build_autoregressive_flow(state_dim, action_dim, horizon, env_dim, flow_length, hidden_dim, initialized=False):
+    """
+    Build a AutoRegressive flow consisting of multiple layers
+    :param state_dim: the dimension of state variable
+    :param action_dim: the dimension of action variable
+    :param horizon: the number of future states to be predicted
+    :param env_dim: the dimension of encoded environment information
+    :param flow_length: the number of the stacked flow layers
+    :param hidden_dim: the dimension of hidden layer in MLP
+    :param initialized: indicate the initialization status of Actnorm layers
+    :return: an AutoRegressive flow
+    """
+    flow_list = []
+    context_order = torch.cat((
+        torch.zeros(state_dim),     # start state
+        torch.arange(horizon).repeat(action_dim, 1).T.reshape(-1),  # action sequence
+        torch.zeros(env_dim)        # environment code
+    ))
+    for _ in range(flow_length):
+        flow_list.append(flows.MaskedAutoRegressiveLayer(horizon=horizon, channel=state_dim,
+                                                         context_dim=state_dim + action_dim * horizon + env_dim,
+                                                         context_order=context_order, intermediate_dim=hidden_dim))
+        flow_list.append(flows.ActNorm(horizon*state_dim, initialized=initialized))
+    if flow_length > 0:
+        flow_list.append(flows.MaskedAutoRegressiveLayer(horizon=horizon, channel=state_dim,
+                                                         context_dim=state_dim + action_dim * horizon + env_dim,
+                                                         context_order=context_order, intermediate_dim=hidden_dim))
+    return flows.SequentialFlow(flow_list)
+
+class FlowModel(nn.Module):
+    """The dynamic model based on normalizing flow"""
+    def __init__(self, state_dim, action_dim, horizon, hidden_dim=256, flow_length=10, condition=True, initialized=False, flow_type='nvp'):
+        super(FlowModel, self).__init__()
+        self.flow_type = flow_type
+        if flow_type == 'nvp':
+            self.flow = build_realnvp_flow(flow_dim=state_dim * horizon,
                                            context_dim=state_dim + action_dim * horizon,
                                            flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
+        else:
+            raise NotImplementedError
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.horizon = horizon
@@ -46,30 +77,6 @@ class RealNVPModel(RealNVPFlow):
             self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon, state_dim * horizon, hidden_dim=hidden_dim)
         else:
             self.prior = flows.GaussianPrior(state_dim * horizon)
-
-    # @staticmethod
-    # def build_nvp_flow(flow_dim, context_dim, flow_length, hidden_dim, initialized=False):
-    #     """
-    #     Build a RealNVP flow
-    #     :param flow_dim: the dimension of variables to be flowed
-    #     :param context_dim: the dimension of the conditioning variables
-    #     :param flow_length: the number of the stacked flow layers
-    #     :return: a flow
-    #     """
-    #     flow_list = []
-    #     for _ in range(flow_length):
-    #         # flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-    #         flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-    #         flow_list.append(flows.ActNorm(flow_dim, initialized=initialized))
-    #         # flow_list.append(flows.BatchNormFlow(flow_dim))
-    #         # flow_list.append(flows.LULinear(flow_dim, context_dim=context_dim))
-    #
-    #         # flow_list.append(flows.LULinear(flow_dim))
-    #         flow_list.append(flows.RandomPermutation(features=flow_dim))
-    #     if flow_length > 0:
-    #         flow_list.append(flows.ResNetCouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-    #     # flow_list.append(flows.CouplingLayer(flow_dim, context_dim=context_dim, intermediate_dim=hidden_dim))
-    #     return flows.SequentialFlow(flow_list)
 
     def forward(self, start_state: torch.Tensor, action: torch.Tensor, reverse=False, traj=None):
         """
@@ -102,27 +109,36 @@ class RealNVPModel(RealNVPFlow):
             z, log_prob = self.prior(z=z, logpx=ldj, context=context, reverse=reverse)
             return z, log_prob
 
-class ImageRealNVPModel(RealNVPFlow):
-    """The dynamic model based on RealNVP, along with an extra encoder to encode environment image"""
-    def __init__(self, state_dim, action_dim, horizon, image_size: Tuple[int, int], env_dim=64, hidden_dim=256, flow_length=10, condition=True, initialized=False,
-                 state_mean=(0, 0, 0, 0), state_std=(1, 1, 1, 1),
-                 action_mean=(0, 0), action_std=(1, 1),
-                 image_mean=torch.zeros(()), image_std=torch.ones(()),
+class ImageFlowModel(nn.Module):
+    """The dynamic model based on normalizing flow, along with an extra encoder to encode environment image"""
+    def __init__(self, state_dim, action_dim, horizon, image_size: Tuple[int, int],
+                 env_dim=64, hidden_dim=256, flow_length=10, condition=True, initialized=False, flow_type='autoregressive',
+                 state_mean=None, state_std=None,
+                 action_mean=None, action_std=None,
+                 image_mean=None, image_std=None,
                  ):
-        super(ImageRealNVPModel, self).__init__(flow_dim=state_dim * horizon,
-                                                context_dim=env_dim + env_dim,
-                                                flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
+        super(ImageFlowModel, self).__init__()
+        self.flow_type = flow_type
+        if flow_type == 'nvp':
+            self.flow = build_realnvp_flow(flow_dim=state_dim * horizon,
+                                           context_dim=env_dim + env_dim,
+                                           flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
+        elif flow_type == 'autoregressive':
+            self.flow = build_autoregressive_flow(state_dim=state_dim, action_dim=action_dim, horizon=horizon,
+                                                  env_dim=env_dim, flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
+        else:
+            raise NotImplementedError(f"flow type {flow_type} not recognizable.")
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.horizon = horizon
         self.image_size = image_size
         self.env_dim = env_dim
-        self.register_buffer('state_mean', torch.tensor(state_mean, dtype=torch.float))
-        self.register_buffer('state_std', torch.tensor(state_std, dtype=torch.float))
-        self.register_buffer('action_mean', torch.tensor(action_mean, dtype=torch.float))
-        self.register_buffer('action_std', torch.tensor(action_std, dtype=torch.float))
-        self.register_buffer('image_mean', torch.tensor(image_mean, dtype=torch.float))
-        self.register_buffer('image_std', torch.tensor(image_std, dtype=torch.float))
+        self.register_buffer('state_mean', torch.tensor(state_mean, dtype=torch.float) if state_mean is not None else torch.zeros(4))
+        self.register_buffer('state_std', torch.tensor(state_std, dtype=torch.float) if state_std is not None else torch.ones(4))
+        self.register_buffer('action_mean', torch.tensor(action_mean, dtype=torch.float) if action_mean is not None else torch.zeros(2))
+        self.register_buffer('action_std', torch.tensor(action_std, dtype=torch.float) if action_std is not None else torch.ones(2))
+        self.register_buffer('image_mean', torch.tensor(image_mean, dtype=torch.float) if image_mean is not None else torch.zeros(()))
+        self.register_buffer('image_std', torch.tensor(image_std, dtype=torch.float) if image_std is not None else torch.ones(()))
 
         if condition:
             self.prior = flows.ConditionalPrior(env_dim + env_dim, state_dim * horizon, hidden_dim=hidden_dim)
@@ -154,9 +170,12 @@ class ImageRealNVPModel(RealNVPFlow):
         image = (image - self.image_mean) / self.image_std
         batch_size = start_state.shape[0]
         env_code = self.encoder.encode(image)   # shape of (B, env_dim)
-        s_u = torch.cat((start_state, action.reshape(batch_size, -1)), dim=1)
-        s_u_code = self.s_u_encoder(s_u)
-        context = torch.cat((s_u_code, env_code), dim=1)
+        if self.flow_type == 'nvp':
+            s_u = torch.cat((start_state, action.reshape(batch_size, -1)), dim=1)
+            s_u_code = self.s_u_encoder(s_u)
+            context = torch.cat((s_u_code, env_code), dim=1)
+        else:
+            context = torch.cat((start_state, action.reshape(batch_size, -1), env_code), dim=1)
         if not reverse: # sampling
             z, log_prob = self.prior(z=None, logpx=0, context=context, reverse=reverse)
             x, ldj = self.flow(z, logpx=0, context=context, reverse=reverse)
