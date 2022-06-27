@@ -29,7 +29,7 @@ class CouplingLayer(nn.Module):
         """
 
         :param x: input to the layer, could be latent variable, could be original variable, depending on param reverse
-        :param context:
+        :param context: the context variable used to condition the output distribution
         :param logpx: log probability before this layer
         :param reverse: True means from original space to latent space, False means from latent space to original space
         :return y: original variable OR latent variable
@@ -48,10 +48,10 @@ class CouplingLayer(nn.Module):
 
         ldj = torch.sum(scale.view(scale.shape[0], -1), dim=1)
 
-        if not reverse:
+        if not reverse:         # sampling
             y1 = (x[:, self.d:] - shift) * torch.exp(-scale)
             ldj = -ldj
-        else:
+        else:                   # training
             y1 = x[:, self.d:] * torch.exp(scale) + shift
 
         y = torch.cat([x[:, :self.d], y1], 1) if not self.swap else torch.cat([y1, x[:, :self.d]], 1)

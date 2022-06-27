@@ -5,6 +5,7 @@ A pseudo 2d environment consists of a roaming disk, a maze, and several obstacle
 import ipdb
 import numpy as np
 import matplotlib
+import torch.nn
 from matplotlib import pyplot as plt
 from matplotlib import animation as animation
 # from IPython.display import HTML
@@ -96,10 +97,14 @@ class MazeEntity(composer.Entity):
         self._obstacle_num = obstacle_num
         self.fixed_obstacle = fixed_obstacle
         self._rgba = [0.2, 0.2, 0.2, 1]
-        self._model.worldbody.add('geom', name='left_wall', type='box', size=[0.01, 0.72, 0.1], pos=[-0.71, 0, 0.1], rgba=self._rgba)
-        self._model.worldbody.add('geom', name='up_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, 0.71, 0.1], rgba=self._rgba)
-        self._model.worldbody.add('geom', name='down_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, -0.71, 0.1], rgba=self._rgba)
-        self._model.worldbody.add('geom', name='right_wall', type='box', size=[0.01, 0.72, 0.1], pos=[0.71, 0, 0.1], rgba=self._rgba)
+        self._model.worldbody.add('geom', name='left_wall', type='box', size=[0.01, 0.72, 0.1], pos=[-0.71, 0, 0.1],
+                                  rgba=self._rgba)
+        self._model.worldbody.add('geom', name='up_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, 0.71, 0.1],
+                                  rgba=self._rgba)
+        self._model.worldbody.add('geom', name='down_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, -0.71, 0.1],
+                                  rgba=self._rgba)
+        self._model.worldbody.add('geom', name='right_wall', type='box', size=[0.01, 0.72, 0.1], pos=[0.71, 0, 0.1],
+                                  rgba=self._rgba)
         self.reset_obstacles()
 
     def reset_obstacles(self, random_state=None):
@@ -108,20 +113,30 @@ class MazeEntity(composer.Entity):
             self._model.worldbody.all_children()[4].remove()
         if not self.fixed_obstacle:
             # add random obstacles
-            radius = distributions.Uniform(low=[0.05 for _ in range(self._obstacle_num)], high=[0.2 for _ in range(self._obstacle_num)])
-            position = distributions.Uniform(low=[[-0.7, -0.7] for _ in range(self._obstacle_num)], high=[[0.7, 0.7] for _ in range(self._obstacle_num)])
+            radius = distributions.Uniform(low=[0.05 for _ in range(self._obstacle_num)],
+                                           high=[0.2 for _ in range(self._obstacle_num)])
+            position = distributions.Uniform(low=[[-0.7, -0.7] for _ in range(self._obstacle_num)],
+                                             high=[[0.7, 0.7] for _ in range(self._obstacle_num)])
             r = radius(random_state=random_state)
             p = position(random_state=random_state)
             for i in range(self._obstacle_num):
-                self._model.worldbody.add('geom', name=f'obstacle_{i}', type='cylinder', size=[r[i], 0.1], pos=[*p[i], 0.1], rgba=self._rgba)
+                self._model.worldbody.add('geom', name=f'obstacle_{i}', type='cylinder', size=[r[i], 0.1],
+                                          pos=[*p[i], 0.1], rgba=self._rgba)
         else:
-            self._model.worldbody.add('geom', name='obstacle_1', type='cylinder', size=[0.05, 0.1], pos=[0.04, 0.35, 0.1], rgba=self._rgba)
-            self._model.worldbody.add('geom', name='obstacle_2', type='cylinder', size=[0.05, 0.1], pos=[-0.37, -0.33, 0.1], rgba=self._rgba)
-            self._model.worldbody.add('geom', name='obstacle_3', type='cylinder', size=[0.05, 0.1], pos=[0.33, -0.22, 0.1], rgba=self._rgba)
-            self._model.worldbody.add('geom', name='obstacle_4', type='cylinder', size=[0.05, 0.1], pos=[0.02, -0.4, 0.1], rgba=self._rgba)
-            self._model.worldbody.add('geom', name='obstacle_5', type='cylinder', size=[0.05, 0.1], pos=[-0.36, 0.28, 0.1], rgba=self._rgba)
-            self._model.worldbody.add('geom', name='obstacle_6', type='cylinder', size=[0.05, 0.1], pos=[0.40, 0.2, 0.1], rgba=self._rgba)
-            self._model.worldbody.add('geom', name='obstacle_7', type='cylinder', size=[0.05, 0.1], pos=[-0.02, -0.03, 0.1], rgba=self._rgba)
+            self._model.worldbody.add('geom', name='obstacle_1', type='cylinder', size=[0.05, 0.1],
+                                      pos=[0.04, 0.35, 0.1], rgba=self._rgba)
+            self._model.worldbody.add('geom', name='obstacle_2', type='cylinder', size=[0.05, 0.1],
+                                      pos=[-0.37, -0.33, 0.1], rgba=self._rgba)
+            self._model.worldbody.add('geom', name='obstacle_3', type='cylinder', size=[0.05, 0.1],
+                                      pos=[0.33, -0.22, 0.1], rgba=self._rgba)
+            self._model.worldbody.add('geom', name='obstacle_4', type='cylinder', size=[0.05, 0.1],
+                                      pos=[0.02, -0.4, 0.1], rgba=self._rgba)
+            self._model.worldbody.add('geom', name='obstacle_5', type='cylinder', size=[0.05, 0.1],
+                                      pos=[-0.36, 0.28, 0.1], rgba=self._rgba)
+            self._model.worldbody.add('geom', name='obstacle_6', type='cylinder', size=[0.05, 0.1],
+                                      pos=[0.40, 0.2, 0.1], rgba=self._rgba)
+            self._model.worldbody.add('geom', name='obstacle_7', type='cylinder', size=[0.05, 0.1],
+                                      pos=[-0.02, -0.03, 0.1], rgba=self._rgba)
 
     @property
     def mjcf_model(self):
@@ -130,6 +145,7 @@ class MazeEntity(composer.Entity):
 
 class UniformBox(variation.Variation):
     """A uniformly sampled horizontal point on a circle of radius `distance`."""
+
     def __init__(self, x_range, y_range):
         self._x_range = x_range
         self._y_range = y_range
@@ -143,19 +159,25 @@ class UniformBox(variation.Variation):
 class NavigationObstacle(composer.Task):
     NUM_SUBSTEPS = 50  # The number of physics substeps per control timestep. # Default physics substep takes 2ms
 
-    def __init__(self, action_noise: float = 0.0, process_noise: float = 0.0, fixed_obstacle=False):
+    def __init__(self, action_noise: float = 0.0, process_noise: float = 0.0, fixed_obstacle=False, cost_function=None):
         self._arena = floors.Floor()
         self._camera = self._arena.mjcf_model.find_all('camera')[0]
         self._robot = DiskEntity()
+        self._goal = DiskEntity(r=0.05, rgba=(0.8, 0.2, 0.2, 1))
         self._maze = MazeEntity(fixed_obstacle=fixed_obstacle)
         self._arena.attach(self._maze)
         rob_frame = self._arena.add_free_entity(self._robot)
+        goal_frame = self._arena.add_free_entity(self._goal)
         self.rob_freejoint = rob_frame.find_all('joint')[0]
+        self.goal_freejoint = goal_frame.find_all('joint')[0]
         self.action_noise = action_noise
         self.process_noise = process_noise
-        self._goal_indicator = self._arena.mjcf_model.worldbody.add('geom', name='goal', type='cylinder', size=[0.05, 0.01], pos=[0., 0., -0.01], rgba=[0.9, 0.1, 0.1, 1])
-        self._goal_cache = None
-        self.cost_function = CostFunction([0., 0.])
+        # self._goal_indicator = self._arena.mjcf_model.worldbody.add('geom', name='goal', type='cylinder', size=[0.05, 0.01], pos=[0., 0., -0.01], rgba=[0.9, 0.1, 0.1, 1])
+        # self._goal_cache = None
+        if cost_function is None:
+            self.cost_function = NaiveCostFunction([0., 0.])
+        else:
+            self.cost_function = cost_function
 
         # texture and light
         self._arena.mjcf_model.worldbody.add('light', pos=[0, 0, 3], dir=[0, 0, -1])
@@ -189,8 +211,10 @@ class NavigationObstacle(composer.Task):
 
         def robot_position(physics):
             return physics.bind(self.rob_freejoint).qpos
+
         def robot_velocity(physics):
             return physics.bind(self.rob_freejoint).qvel
+
         self._task_observables = {}
         self._task_observables['robot_position'] = observable.Generic(robot_position)
         self._task_observables['robot_velocity'] = observable.Generic(robot_velocity)
@@ -221,11 +245,12 @@ class NavigationObstacle(composer.Task):
 
     def initialize_episode_mjcf(self, random_state):
         # self._mjcf_variator.apply_variations(random_state)
-        if self._goal_cache is None:
-            self._maze.reset_obstacles(random_state)
-        else:
-            self._goal_indicator.pos[0:2] = self._goal_cache
-            self.cost_function.goal = self._goal_cache
+        self._maze.reset_obstacles(random_state)
+        # if self._goal_cache is None:
+        #     self._maze.reset_obstacles(random_state)
+        # else:
+        #     self._goal_indicator.pos[0:2] = self._goal_cache
+        #     self.cost_function.goal = self._goal_cache
 
     def initialize_episode(self, physics, random_state):
         while True:
@@ -234,22 +259,31 @@ class NavigationObstacle(composer.Task):
                 (self._robot_initial_pose, self._robot_initial_velocity, self._goal_generator),
                 random_state=random_state)
             with physics.reset_context():
-                self._robot.set_pose(physics, position=goal, quaternion=np.array([1, 0, 0, 0]))
-            if check_body_collision(physics, 'unnamed_model/', 'unnamed_model_1/'):
-                continue
-            with physics.reset_context():
                 self._robot.set_pose(physics, position=robot_pose, quaternion=np.array([1, 0, 0, 0]))
                 self._robot.set_velocity(physics, velocity=robot_vel, angular_velocity=np.zeros(3))
-            if check_body_collision(physics, 'unnamed_model/', 'unnamed_model_1/'):
+                self._goal.set_pose(physics, position=goal, quaternion=np.array([1, 0, 0, 0]))
+                # self._robot.set_pose(physics, position=goal, quaternion=np.array([1, 0, 0, 0]))
+            if check_body_collision(physics, 'unnamed_model/', 'unnamed_model_1/') \
+                    or check_body_collision(physics, 'unnamed_model/', 'unnamed_model_2/') \
+                    or check_body_collision(physics, 'unnamed_model_1/', 'unnamed_model_2/'):
                 continue
             break
-        if self._goal_cache is None:
-            self._goal_cache = goal[0:2]
-            raise EpisodeInitializationError
-        else:
-            self._goal_cache = None
-            # self._goal_indicator.pos = [goal[0], goal[1], -0.01]
-            # self._goal_indicator = self._arena.mjcf_model.worldbody.add('geom', name='goal', type='cylinder', size=[0.05, 0.01], pos=[goal[0], goal[1], -0.01], rgba=[0.9, 0.1, 0.1, 1])
+        self.cost_function.goal = goal[0:2]
+        aerial_image = self.get_aerial_view(physics)
+        self.cost_function.env_image = aerial_image
+
+        # print(f"Robot pose: {physics.bind(self.rob_freejoint).qpos[0:3]}")
+
+        # if self._goal_cache is None:
+        #     self._goal_cache = goal[0:2]
+        #     raise EpisodeInitializationError
+        # else:
+        #     self._goal_cache = None
+
+        # init_pos = physics.bind(self.rob_freejoint).qpos[0:3]
+        # print(f"initial position: {init_pos}")
+        # self._goal_indicator.pos = [goal[0], goal[1], -0.01]
+        # self._goal_indicator = self._arena.mjcf_model.worldbody.add('geom', name='goal', type='cylinder', size=[0.05, 0.01], pos=[goal[0], goal[1], -0.01], rgba=[0.9, 0.1, 0.1, 1])
         # print("final robot pose:", self.observables['robot_position'](physics)[0:2], "desired:", goal[0:2])
         # print("final goal pose:", self._goal_indicator.pos[0:2], "desired:", goal[0:2])
         # print("-"*10)
@@ -278,24 +312,29 @@ class NavigationObstacle(composer.Task):
         return (collision,)
 
     def get_aerial_view(self, physics, show=False) -> np.ndarray:
-        # move the robot out of camera view temporarily
-        origin_pos = physics.bind(self.rob_freejoint).qpos[0:3].copy()
+        # move the robot and the goal out of camera view temporarily
+        origin_rob_pos = physics.bind(self.rob_freejoint).qpos[0:3].copy()
+        origin_rob_vel = physics.bind(self.rob_freejoint).qvel[0:3].copy()
+        origin_goal_pos = physics.bind(self.goal_freejoint).qpos[0:3].copy()
         with physics.reset_context():
             self._robot.set_pose(physics, position=[999, 999, 10], quaternion=np.array([1, 0, 0, 0]))
+            self._goal.set_pose(physics, position=[999, 999, 10], quaternion=np.array([1, 0, 0, 0]))
         camera = mujoco.Camera(physics, height=128, width=128, camera_id='top_camera')
         seg = camera.render(segmentation=True)
         # Display the contents of the first channel, which contains object
         # IDs. The second channel, seg[:, :, 1], contains object types.
         geom_ids = seg[:, :, 0]
         # clip to bool variables
-        pixels = geom_ids.clip(min=0, max=1)    # shape (height, width)
+        pixels = geom_ids.clip(min=0, max=1)  # shape (height, width)
         # draw
         if show:
             fig, ax = plt.subplots(1, 1)
             ax.imshow(pixels, cmap='gray')
-        # move the robot back
+        # move the robot and the goal back
         with physics.reset_context():
-            self._robot.set_pose(physics, position=origin_pos, quaternion=np.array([1, 0, 0, 0]))
+            self._robot.set_pose(physics, position=origin_rob_pos, quaternion=np.array([1, 0, 0, 0]))
+            self._robot.set_velocity(physics, velocity=origin_rob_vel, angular_velocity=np.zeros(3))
+            self._goal.set_pose(physics, position=origin_goal_pos, quaternion=np.array([1, 0, 0, 0]))
         return pixels
 
 
@@ -341,7 +380,10 @@ def check_body_collision(physics: mjcf.Physics, body1: str, body2: str):
 #     # return HTML(anim.to_html5_video())
 #     return
 
-class CostFunction:
+class NaiveCostFunction:
+    """
+    A simple cost function that encourages the robot to take the action towards the goal
+    """
     def __init__(self, goal: list):
         self.goal = np.array(goal)
 
@@ -351,29 +393,42 @@ class CostFunction:
         u_norm = u / np.linalg.norm(u)
         return -dist_norm @ u_norm
 
+
 if __name__ == "__main__":
-    task = NavigationObstacle(process_noise=0.000, action_noise=0.05, fixed_obstacle=True)
+    task = NavigationObstacle(process_noise=0.000, action_noise=0.05, fixed_obstacle=False)
     # seed = np.random.RandomState(22)
     seed = None
     env = composer.Environment(task, random_state=seed, max_reset_attempts=2)
-    obs = env.reset()
-    history = []
+    # obs = env.reset()
+
+    # def mppi_plan(time_step):
+    #     robot_pos = time_step.observation['robot_position'][0, 0:2]
+    #     robot_vel = time_step.observation['robot_velocity'][0, 0:2]
+    #     robot_state = np.concatenate((robot_pos, robot_vel), axis=0)
+    #     action_seq = planner.step(robot_state)
+    #     final_action = action_seq[0].cpu().detach().numpy()
+    #     print(final_action)
+    #     return final_action
+
+    # viewer.launch(env, policy=mppi_plan)
+
+    # history = []
     controller = RandomController(udim=2, urange=10, horizon=40, lower_bound=[-10, -10], upper_bound=[10, 10])
-    epsilon_controller = EpsilonGreedyController(cost=task.cost_function, lower_bound=[-10, -10], upper_bound=[10, 10])
+    # epsilon_controller = EpsilonGreedyController(cost=task.cost_function, lower_bound=[-10, -10], upper_bound=[10, 10])
     action_seq = controller.step(x=None)
     i = 0
     def random_policy(time_step):
         global i, action_seq
         # ipdb.set_trace()
-        history.append(env.physics.data.time)
+        # history.append(env.physics.data.time)
         if env.physics.data.time < 0.02:
             i = 0
             # action_seq = controller.step(x=None)
-            robot_pos = env.physics.bind(env._task.rob_freejoint).qpos
-            robot_vel = env.physics.bind(env._task.rob_freejoint).qvel
-            robot_pos[0:2] = [0.1, 0.1]
-            robot_vel[0:2] = [0, 0]
-        # print(time_step)
+            # robot_pos = env.physics.bind(env._task.rob_freejoint).qpos
+            # robot_vel = env.physics.bind(env._task.rob_freejoint).qvel
+            # robot_pos[0:2] = [0.1, 0.1]
+            # robot_vel[0:2] = [0, 0]
+        # print(time_step.reward)
 
         if i < len(action_seq):
             action = action_seq[i]
@@ -388,12 +443,12 @@ if __name__ == "__main__":
         # print(action)
         return action
 
+
     # task.get_aerial_view(env.physics, show=True)
 
     viewer.launch(env, policy=random_policy)
     # viewer.launch(env, policy=epsilon_controller.step)
-    # ipdb.set_trace()
-
+    ipdb.set_trace()
 
     # duration = 10  # (Seconds)
     # framerate = 30  # (Hz)

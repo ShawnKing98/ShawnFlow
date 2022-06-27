@@ -19,7 +19,7 @@ class MPPI:
         self.action_transform = action_transform
         self.flow = flow
         self.best_K_U = None
-        self.K = 100
+        self.K = 10
 
     def step(self, x):
 
@@ -45,12 +45,14 @@ class MPPI:
                 peturbed_actions = torch.clamp(peturbed_actions, min=self.control_constraints[0],
                                                max=self.control_constraints[1])
             action_cost = torch.sum(self.lambda_ * noise * self.U / self.sigma, dim=[1, 2]) / self.du
+        # peturbed_actions = 10 * torch.ones_like(peturbed_actions)
         # Get total cost
         total_cost = self.cost(x, peturbed_actions)
-        #total_cost -= torch.min(total_cost)
+        # total_cost -= torch.min(total_cost)
         total_cost += action_cost
-        #omega = torch.exp(-total_cost / self.lambda_)
-        #omega /= torch.sum(omega)
+        # omega = torch.exp(-total_cost / self.lambda_)
+        # omega /= torch.sum(omega)
+        total_cost -= total_cost.min()
         omega = torch.softmax(-total_cost / self.lambda_, dim=0)
 
         self.U = torch.sum((omega.reshape(-1, 1, 1) * peturbed_actions), dim=0)

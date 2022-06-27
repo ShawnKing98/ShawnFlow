@@ -12,7 +12,7 @@ class RandomController:
         :param udim: the dimension of actions
         :param urange: the range of actions
         :param horizon: the control horizon
-        :param sigma: the smoothness of actions
+        :param sigma: the smoothness of actions, the bigger the smoother
         :param lower_bound: lower bound of actions
         :param upper_bound: upper bound of actions
         """
