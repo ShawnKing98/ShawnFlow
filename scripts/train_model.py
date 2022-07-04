@@ -32,14 +32,14 @@ def parse_arguments():
     parser.add_argument('--batch-size', type=int, default=2**8)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print-epochs', type=int, default=20)
-    parser.add_argument('--condition-prior', type=bool, default=True)
+    parser.add_argument('--condition-prior', type=bool, default=False)
     parser.add_argument('--with-image', type=bool, default=True)
     parser.add_argument('--state-dim', type=int, default=4)
     parser.add_argument('--control-dim', type=int, default=2)
     parser.add_argument('--env-dim', type=int, default=64)
     parser.add_argument('--double-flow', type=bool, default=False, help="whether to enable the double flow architecture")
     parser.add_argument('--with-contact', type=bool, default=True)
-    parser.add_argument('--contact-dim', type=int, default=1, help="the contact status dimension at one timestamp")
+    parser.add_argument('--contact-dim', type=int, default=None, help="the contact status dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--hidden-dim', type=int, default=256)
@@ -56,10 +56,10 @@ def parse_arguments():
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
-    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
+    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='msar')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_latent_classify_7', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='loss weight 1:0:5', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_2d_mul_scale_2', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='multi scale flow without conditional prior', help="any additional information")
     # parser.add_argument('--vae-flow-prior', action='store_true')
     # parser.add_argument('--supervised', action='store_true')
     # parser.add_argument('--load-vae', type=str, default=None)
@@ -256,7 +256,8 @@ if __name__ == "__main__":
             # dist, std_true, std_pred, prior_std = visualize_fn(env, model, horizon=args.horizon, dist_type=args.dist_metric, title=args.name)
             if "disk" in args.name:
                 dist, std_true, std_pred, prior_std = visualize_flow_from_data(data=val_data_tuple, flow=model, device=args.device,
-                                                                               dist_type=args.dist_metric, horizon=args.horizon, with_contact=args.with_contact)
+                                                                               dist_type=args.dist_metric, horizon=args.horizon,
+                                                                               with_contact=args.with_contact, with_image=args.with_image)
             elif "rope" in args.name:
                 dist, std_true, std_pred, prior_std = visualize_rope_2d_from_data(data=val_data_tuple, flow=model, device=args.device,
                                                                                   dist_type=args.dist_metric, horizon=args.horizon)

@@ -19,14 +19,14 @@ def parse_args():
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--friction-noise', type=float, default=0.1)
     parser.add_argument('--action-range', type=float, default=10.)
-    parser.add_argument('--N', type=int, default=20000, help='the number of environments')
+    parser.add_argument('--N', type=int, default=50000, help='the number of environments')
     parser.add_argument('--samples-per-env', type=int, default=10, help='the number of sampled trajectories per environment')
     parser.add_argument('--fix-obstacle', action='store_true')
-    parser.add_argument('--name', type=str, default='full_disk_2d_with_contact_env_2')
+    parser.add_argument('--name', type=str, default='full_disk_2d_with_contact_env_3')
     parser.add_argument('--H', type=int, default=40, help='time horizon')
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--controller', type=str, default="random")
-    parser.add_argument('--remark', type=str, default='larger dataset (20,000 environments)', help="any additional information")
+    parser.add_argument('--remark', type=str, default='larger dataset (50,000 environments)', help="any additional information")
     args = parser.parse_args()
 
     args.env = args.env.lower()
@@ -49,47 +49,51 @@ def generate_disk_dataset(env, num_environments, samples_per_env, controller=Non
     i = 0
     # control_sequence = controller.step(None)
     while i < num_environments:
-        if (i % 10) == 0:
-            print(f"{i}/{num_environments}")
-        i += 1
-        obs = env.reset()
-        initial_position = obs.observation['robot_position'][0][0:2]
-        initial_velocity = obs.observation['robot_velocity'][0][0:2]
-        control_sequence = controller.step(None)
-        starts = []
-        views = env.task.get_aerial_view(env.physics)
-        control_sequences = []
-        states = []     # not including the start
-        contact_flags = []
+        try:
+            if (i % 10) == 0:
+                print(f"{i}/{num_environments}")
+            i += 1
+            obs = env.reset()
+            initial_position = obs.observation['robot_position'][0][0:2]
+            initial_velocity = obs.observation['robot_velocity'][0][0:2]
+            control_sequence = controller.step(None)
+            starts = []
+            views = env.task.get_aerial_view(env.physics)
+            control_sequences = []
+            states = []     # not including the start
+            contact_flags = []
 
-        # Get multiple trajectories for each environments, they have the same obstacles, start pose and control sequence
-        for _ in range(samples_per_env):
-            # env.reset()
-            with env.physics.reset_context():
-                env._task._robot.set_pose(env.physics, (*initial_position, 0), np.array([1, 0, 0, 0]))
-                env._task._robot.set_velocity(env.physics, (*initial_velocity, 0), np.zeros(3))
-            starts.append(np.concatenate((initial_position, initial_velocity)))
-            control_sequences.append(control_sequence)
+            # Get multiple trajectories for each environments, they have the same obstacles, start pose and control sequence
+            for _ in range(samples_per_env):
+                # env.reset()
+                with env.physics.reset_context():
+                    env._task._robot.set_pose(env.physics, (*initial_position, 0), np.array([1, 0, 0, 0]))
+                    env._task._robot.set_velocity(env.physics, (*initial_velocity, 0), np.zeros(3))
+                starts.append(np.concatenate((initial_position, initial_velocity)))
+                control_sequences.append(control_sequence)
 
-            single_traj = []
-            single_contact_flags = []
-            for t in range(len(control_sequence)):
-                obs = env.step(control_sequence[t])
-                assert obs.reward[0] is not None
-                position = obs.observation['robot_position'][0][0:2]
-                velocity = obs.observation['robot_velocity'][0][0:2]
-                single_traj.append(np.concatenate((position, velocity)))
-                single_contact_flags.append(obs.reward[0])
-            single_traj = np.stack(single_traj, axis=0)
-            single_contact_flags = np.stack(single_contact_flags, axis=0)
-            states.append(single_traj)
-            contact_flags.append(single_contact_flags)
-        # ipdb.set_trace()
-        data['starts'].append(np.stack(starts, axis=0))
-        data['states'].append(np.stack(states, axis=0))
-        data['U'].append(np.stack(control_sequences, axis=0))
-        data['views'].append(views)
-        data['contact'].append(contact_flags)
+                single_traj = []
+                single_contact_flags = []
+                for t in range(len(control_sequence)):
+                    obs = env.step(control_sequence[t])
+                    assert obs.reward[0] is not None
+                    position = obs.observation['robot_position'][0][0:2]
+                    velocity = obs.observation['robot_velocity'][0][0:2]
+                    single_traj.append(np.concatenate((position, velocity)))
+                    single_contact_flags.append(obs.reward[0])
+                single_traj = np.stack(single_traj, axis=0)
+                single_contact_flags = np.stack(single_contact_flags, axis=0)
+                states.append(single_traj)
+                contact_flags.append(single_contact_flags)
+            # ipdb.set_trace()
+            data['starts'].append(np.stack(starts, axis=0))
+            data['states'].append(np.stack(states, axis=0))
+            data['U'].append(np.stack(control_sequences, axis=0))
+            data['views'].append(views)
+            data['contact'].append(contact_flags)
+        except:
+            i -= 1
+            print("Environment broken!")
 
     stacked_data = {}
     for key, item in data.items():

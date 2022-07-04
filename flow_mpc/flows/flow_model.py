@@ -91,7 +91,8 @@ def build_autoregressive_flow(state_dim, action_dim, channel_num, horizon, env_d
     return flows.SequentialFlow(flow_list)
 
 
-def build_multi_scale_autoregressive_flow(state_dim, action_dim, channel_num, horizon, env_dim, hidden_dim, initialized=False, extra_context_order=None):
+def build_multi_scale_autoregressive_flow(state_dim, action_dim, channel_num, horizon, env_dim, hidden_dim,
+                                          initialized=False, extra_context_order=None, condition_prior=True):
     """
     Build an AutoRegressive flow consisting of multiple layers with different scale depending on horizon
     :param state_dim: the dimension of state variable
@@ -106,7 +107,7 @@ def build_multi_scale_autoregressive_flow(state_dim, action_dim, channel_num, ho
     """
     flow_list = []
     extra_context_order = torch.zeros(0) if extra_context_order is None else extra_context_order
-    forward_flag = True  # indicate whether the flow is doing forward inference or backward inference
+    forward_flag = False  # indicate whether the flow is doing forward inference or backward inference
     current_horizon = 1
     flow_length = 2*horizon
     for i in range(flow_length):
@@ -126,13 +127,16 @@ def build_multi_scale_autoregressive_flow(state_dim, action_dim, channel_num, ho
                 extra_context_order,  # extra context
                 torch.zeros(1),  # noise magnitude
             ))
-        if forward_flag and i != 0:
+        if i != 0 and not forward_flag:
             # mask out the future action input
             context_mask = (context_order <= current_horizon)
-            flow_list.append(flows.ConditionalSplitFlow(z_dim=current_horizon*channel_num + channel_num,
-                                                        z_split_dim=current_horizon*channel_num,
-                                                        context_dim=context_mask.sum(), hidden_dim=hidden_dim,
-                                                        context_mask=context_mask))
+            if condition_prior:
+                flow_list.append(flows.ConditionalSplitFlow(z_dim=current_horizon*channel_num + channel_num,
+                                                            z_split_dim=channel_num,
+                                                            context_dim=context_mask.sum(), hidden_dim=hidden_dim,
+                                                            context_mask=context_mask))
+            else:
+                flow_list.append(flows.SplitFlow(z_split_dim=channel_num))
             current_horizon += 1
         flow_list.append(flows.MaskedAutoRegressiveLayer(horizon=current_horizon, channel=channel_num,
                                                          context_order=context_order, intermediate_dim=hidden_dim))
@@ -140,6 +144,7 @@ def build_multi_scale_autoregressive_flow(state_dim, action_dim, channel_num, ho
         flow_list.append(flows.Permutation(torch.arange(current_horizon*channel_num).__reversed__()))
         forward_flag = not forward_flag
     if flow_length > 0:
+        assert current_horizon == horizon
         if forward_flag:
             context_order = torch.cat((
                 torch.zeros(state_dim),  # start state
@@ -158,6 +163,7 @@ def build_multi_scale_autoregressive_flow(state_dim, action_dim, channel_num, ho
             ))
         flow_list.append(flows.MaskedAutoRegressiveLayer(horizon=horizon, channel=channel_num,
                                                          context_order=context_order, intermediate_dim=hidden_dim))
+        flow_list.append(flows.Permutation(torch.arange(horizon * channel_num).__reversed__()))
     return flows.SequentialFlow(flow_list)
 
 
@@ -300,22 +306,6 @@ class ImageFlowModel(nn.Module):
         super(ImageFlowModel, self).__init__()
         self.flow_type = flow_type
         self.contact_input = with_contact
-        if flow_type == 'nvp':
-            self.flow = build_realnvp_flow(flow_dim=state_dim * horizon,
-                                           context_dim=state_dim + action_dim * horizon + env_dim + 1,
-                                           flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
-        elif flow_type == 'autoregressive':
-            extra_context_order = torch.arange(horizon) if with_contact else None
-            self.flow = build_autoregressive_flow(state_dim=state_dim, action_dim=action_dim, channel_num=state_dim,
-                                                  horizon=horizon, env_dim=env_dim, flow_length=flow_length,
-                                                  hidden_dim=hidden_dim, initialized=initialized, extra_context_order=extra_context_order)
-        elif flow_type == 'msar':
-            extra_context_order = torch.arange(horizon) if with_contact else None
-            self.flow = build_multi_scale_autoregressive_flow(state_dim=state_dim, action_dim=action_dim, channel_num=state_dim,
-                                                              horizon=horizon, env_dim=env_dim, hidden_dim=hidden_dim,
-                                                              initialized=initialized, extra_context_order=extra_context_order)
-        else:
-            raise NotImplementedError(f"flow type {flow_type} not recognizable.")
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.horizon = horizon
@@ -330,31 +320,38 @@ class ImageFlowModel(nn.Module):
         self.register_buffer('image_std', torch.tensor(image_std, dtype=torch.float) if image_std is not None else torch.ones(()))
         self.register_buffer('flow_mean', torch.tensor(flow_mean, dtype=torch.float) if flow_mean is not None else torch.zeros((state_dim)))
         self.register_buffer('flow_std', torch.tensor(flow_std, dtype=torch.float) if flow_std is not None else torch.ones((state_dim)))
-
-        if condition:
-            if with_contact:
-                context_order = torch.cat((
-                    torch.zeros(state_dim),  # start state
-                    torch.arange(horizon).repeat(action_dim, 1).T.reshape(-1),  # action sequence
-                    torch.zeros(env_dim),   # environment code
-                    torch.arange(horizon),  # contact flag
-                    torch.zeros(1)          # noise magnitude
-                ))
-                self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon + env_dim + horizon + 1,
-                                                    state_dim * horizon, hidden_dim=hidden_dim,
-                                                    context_order=context_order)
-            else:
-                context_order = torch.cat((
-                    torch.zeros(state_dim),  # start state
-                    torch.arange(horizon).repeat(action_dim, 1).T.reshape(-1),  # action sequence
-                    torch.zeros(env_dim),  # environment code
-                    torch.zeros(1)  # noise magnitude
-                ))
-                self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon + env_dim + 1,
-                                                    state_dim * horizon, hidden_dim=hidden_dim,
-                                                    context_order=context_order)
+        if flow_type == 'nvp':
+            self.flow = build_realnvp_flow(flow_dim=state_dim * horizon,
+                                           context_dim=state_dim + action_dim * horizon + env_dim + 1,
+                                           flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
+        elif flow_type == 'autoregressive':
+            extra_context_order = torch.arange(horizon) if with_contact else None
+            self.flow = build_autoregressive_flow(state_dim=state_dim, action_dim=action_dim, channel_num=state_dim,
+                                                  horizon=horizon, env_dim=env_dim, flow_length=flow_length,
+                                                  hidden_dim=hidden_dim, initialized=initialized, extra_context_order=extra_context_order)
+        elif flow_type == 'msar':
+            extra_context_order = torch.arange(horizon) if with_contact else None
+            self.flow = build_multi_scale_autoregressive_flow(state_dim=state_dim, action_dim=action_dim, channel_num=state_dim,
+                                                              horizon=horizon, env_dim=env_dim, hidden_dim=hidden_dim,
+                                                              initialized=initialized, extra_context_order=extra_context_order,
+                                                              condition_prior=condition)
         else:
-            self.prior = flows.GaussianPrior(state_dim * horizon)
+            raise NotImplementedError(f"flow type {flow_type} not recognizable.")
+        initial_horizon = 1 if flow_type == 'msar' else horizon
+        if condition:
+            contact_input_dim = horizon if with_contact else 0
+            context_order = torch.cat((
+                torch.zeros(state_dim),  # start state
+                torch.arange(horizon).repeat(action_dim, 1).T.reshape(-1),  # action sequence
+                torch.zeros(env_dim),  # environment code
+                torch.arange(contact_input_dim),  # contact flag
+                torch.zeros(1)  # noise magnitude
+            ))
+            self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon + env_dim + contact_input_dim + 1,
+                                                state_dim * initial_horizon, hidden_dim=hidden_dim,
+                                                context_order=context_order)
+        else:
+            self.prior = flows.GaussianPrior(state_dim * initial_horizon)
 
         self.encoder = Encoder(image_size, env_dim)
         # self.s_u_encoder = nn.Sequential(nn.Linear(state_dim + action_dim * horizon, hidden_dim),

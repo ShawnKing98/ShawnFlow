@@ -5,6 +5,6 @@ from .lu import LULinear
 from .permutation import RandomPermutation, Permutation
 from .batchnorm import BatchNormFlow
 from .glow_layers import ActNorm
-from .splits_and_priors import ConditionalPrior, GaussianPrior, ConditionalSplitFlow
+from .splits_and_priors import ConditionalPrior, GaussianPrior, ConditionalSplitFlow, SplitFlow
 from .sequential import SequentialFlow, CouplingSequentialFlow
 from .flow_model import FlowModel, ImageFlowModel, DoubleImageFlowModel, CouplingImageFlowModel

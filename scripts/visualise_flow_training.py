@@ -33,7 +33,7 @@ def parse_args():
     # parser.add_argument('--name', type=str, required=True)
     parser.add_argument('--test-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_autoregressive_full_14")
+    parser.add_argument('--flow-name', type=str, default="disk_2d_free_1")
     parser.add_argument('--use-data', type=bool, default=True)
     # parser.add_argument('--data-file', type=str, default='../data/training_traj/single_disk_2d_env_2/single_disk_2d_env_2.npz')
     # parser.add_argument('--condition-prior', type=bool, default=True)
@@ -60,7 +60,7 @@ def parse_args():
         # if getattr(args, k, None) is None:
         setattr(args, k, v)
     args.dist_metric = 'frechet'
-    args.data_file = "../data/training_traj/full_disk_2d_with_contact_env_1/full_disk_2d_with_contact_env_1.npz"
+    # args.data_file = "../data/training_traj/full_disk_2d_with_contact_env_1/full_disk_2d_with_contact_env_1.npz"
     for (arg, value) in args._get_kwargs():
         print(f"{arg}: {value}")
     return args
@@ -75,7 +75,8 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
                              horizon: int=40,
                              title=None,
                              gif_fig: matplotlib.figure.Figure=None,
-                             with_contact=False):
+                             with_contact=False,
+                             with_image=True):
     """
     Visualize the predicted trajectory distribution vs. ground truth trajectory distribution of disk environment, given
     the validation dataset. Also return some stochastic metric of the two sets of trajectories.
@@ -99,20 +100,23 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
     start_pose = data[0][idx, 0]
     start_tensor = torch.tensor(start_pose, device=device, dtype=torch.float).unsqueeze(0)
     action = torch.tensor(data[2][idx, 0, 0:horizon], device=device, dtype=torch.float).unsqueeze(0)
-    image = data[3][idx]
+    image = data[3][idx] if with_image else None
     contact_flag = torch.tensor(data[4][idx, 0, 0:horizon], device=device, dtype=torch.float).unsqueeze(0) if with_contact else None
     artists = []
     # draw image
-    if gif_fig is not None:
-        image_box = OffsetImage(1-image, cmap='gray', zoom=1.707)
-        artists.append(gif_fig.axes[0].add_artist(AnnotationBbox(image_box, (0, 0), zorder=-2, pad=99)))
-    image = torch.tensor(image, device=device, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+    if image is not None:
+        image = torch.tensor(image, device=device, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+        if gif_fig is not None:
+            image_box = OffsetImage(1-image, cmap='gray', zoom=1.707)
+            artists.append(gif_fig.axes[0].add_artist(AnnotationBbox(image_box, (0, 0), zorder=-2, pad=99)))
+
 
     # calculate the variance of the prior
     if not (isinstance(flow, DoubleImageFlowModel) or isinstance(flow, CouplingImageFlowModel)):
         prior = flow.prior
     else:
         prior = flow.dynamic_prior if with_contact else flow.contact_prior
+    attn_mask = None
     if isinstance(prior, GaussianPrior):
         prior_std = np.zeros(1)
     elif isinstance(prior, ConditionalPrior):
@@ -123,7 +127,6 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
                 env_code, attn_mask = flow.encoder.encode(image, encoder_context)
             else:
                 env_code = flow.encoder.encode(image)
-                attn_mask = None
             # s_u_code = flow.s_u_encoder(context)
             # context = torch.cat((s_u_code, env_code), dim=1)
             context = torch.cat((context, env_code), dim=1)
@@ -162,6 +165,7 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
         with torch.no_grad():
             if isinstance(flow, FlowModel):
                 pred_traj = flow(start_tensor, action)[0][:, :, 0:2]
+                pred_contact_state = None
             elif isinstance(flow, CouplingImageFlowModel) or isinstance(flow, DoubleImageFlowModel):
                 model_return = flow(start_tensor, action, image, reconstruct=False, contact_flag=contact_flag, output_contact=True)
                 pred_traj, pred_contact, image_reconstruct = model_return[0], model_return[1], model_return[3]
@@ -191,7 +195,10 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
     # draw ground truth trajectory
     for i in range(test_num):
         true_traj = data[1][idx, i, 0:horizon, 0:2]
-        true_contact = data[4][idx, i, 0:horizon]
+        try:
+            true_contact = data[4][idx, i, 0:horizon]
+        except IndexError:
+            true_contact = torch.zeros(horizon).bool()
         true_contact_state = true_traj[true_contact]
         single_traj = np.concatenate((np.expand_dims(start_pose[0:2], 0), true_traj), axis=0)
         label = 'ground truth distribution' if i == 0 else None
@@ -569,13 +576,14 @@ if __name__ == "__main__":
     for i in range(args.trial_num):
         # dist, std_true, std_pred, prior_std = visualize_flow(env, model, dist_type='L2', title=args.flow_path)
         if args.use_data:
-            dist, std_true, std_pred, prior_std, artists = visualize_flow_from_data(val_data_tuple, model,
+            dist, std_true, std_pred, prior_std, artists = visualize_flow_from_data(train_data_tuple, model,
                                                                                     device=args.device,
                                                                                     dist_type=args.dist_metric,
                                                                                     test_num=args.test_num,
                                                                                     horizon=args.horizon,
                                                                                     title=args.flow_path, gif_fig=fig,
-                                                                                    with_contact=args.with_contact)
+                                                                                    with_contact=args.with_contact,
+                                                                                    with_image=args.with_image)
         else:
             dist, std_true, std_pred, prior_std, artists = visualize_flow_mujoco(env_mujoco, model, device=args.device, controller=controller, dist_type=args.dist_metric, test_num=args.test_num, title=args.flow_path, gif_fig=fig)
         ax = plt.gca()
