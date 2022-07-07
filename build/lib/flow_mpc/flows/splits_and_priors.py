@@ -196,6 +196,7 @@ class ConditionalSplitFlow(nn.Module):
                    nn.Linear(hidden_dim, 2 * z_split_dim)]
         self.fc = nn.Sequential(*self.fc)
         # self.fc2 = nn.Linear(context_dim, 2 * z_split_dim)
+        self.z_dim = z_dim
         self.z_split_dim = z_split_dim
         self.register_buffer("context_mask", context_mask)
         # self.act_fn = F.relu
@@ -203,8 +204,8 @@ class ConditionalSplitFlow(nn.Module):
     def forward(self, z, logpx, context, reverse=False):
         """Keep the first z_split_dim variable and drop the remaining ones"""
         if self.context_mask is not None:
-            context = context[self.context_mask.bool()]
-        inpt = torch.cat((z[:, :self.z_split_dim], context), dim=1)
+            context = context[:, self.context_mask.bool()]
+        inpt = torch.cat((z[:, :self.z_dim-self.z_split_dim], context), dim=1)
         # z_split_mu, z_split_std = torch.chunk(self.fc2(self.act_fn(self.fc1(inpt))), chunks=2, dim=1)
         z_split_mu, z_split_std = torch.chunk(self.fc(inpt), chunks=2, dim=1)
         z_split_std = torch.sigmoid(z_split_std) + 1e-7
@@ -215,7 +216,7 @@ class ConditionalSplitFlow(nn.Module):
             z = torch.cat((z, z_split), dim=1)
         else:
             z_split = z[:, -self.z_split_dim:]
-            z = z[:, :self.z_split_dim]
+            z = z[:, :-self.z_split_dim]
 
         logpx = logpx + prior.log_prob(z_split).sum(dim=1)
         return z, logpx
@@ -223,16 +224,17 @@ class ConditionalSplitFlow(nn.Module):
 
 class SplitFlow(nn.Module):
 
-    def __init__(self):
+    def __init__(self, z_split_dim):
         super().__init__()
         self.prior = Normal(loc=0.0, scale=1.0)
+        self.z_split_dim = z_split_dim
 
-    def forward(self, z, logpx, reverse=False):
+    def forward(self, z, logpx, context=None, reverse=False):
         B = z.shape[0]
-        if not reverse:
-            z, z_split = z.chunk(2, dim=1)
+        if reverse:
+            z, z_split = z[:, :-self.z_split_dim], z[:, -self.z_split_dim:]
         else:
-            z_split = self.prior.sample(sample_shape=z.shape).to(z.device)
+            z_split = self.prior.rsample(sample_shape=(B, self.z_split_dim)).to(z.device)
             z = torch.cat([z, z_split], dim=1)
         logpx += self.prior.log_prob(z_split).reshape(B, -1).sum(dim=1)
         return z, logpx

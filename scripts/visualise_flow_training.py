@@ -33,7 +33,7 @@ def parse_args():
     # parser.add_argument('--name', type=str, required=True)
     parser.add_argument('--test-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_2d_free_1")
+    parser.add_argument('--flow-name', type=str, default="disk_2d_mul_scale_2")
     parser.add_argument('--use-data', type=bool, default=True)
     # parser.add_argument('--data-file', type=str, default='../data/training_traj/single_disk_2d_env_2/single_disk_2d_env_2.npz')
     # parser.add_argument('--condition-prior', type=bool, default=True)
@@ -105,10 +105,10 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
     artists = []
     # draw image
     if image is not None:
-        image = torch.tensor(image, device=device, dtype=torch.float).unsqueeze(0).unsqueeze(0)
         if gif_fig is not None:
             image_box = OffsetImage(1-image, cmap='gray', zoom=1.707)
             artists.append(gif_fig.axes[0].add_artist(AnnotationBbox(image_box, (0, 0), zorder=-2, pad=99)))
+        image = torch.tensor(image, device=device, dtype=torch.float).unsqueeze(0).unsqueeze(0)
 
 
     # calculate the variance of the prior
@@ -576,7 +576,7 @@ if __name__ == "__main__":
     for i in range(args.trial_num):
         # dist, std_true, std_pred, prior_std = visualize_flow(env, model, dist_type='L2', title=args.flow_path)
         if args.use_data:
-            dist, std_true, std_pred, prior_std, artists = visualize_flow_from_data(train_data_tuple, model,
+            dist, std_true, std_pred, prior_std, artists = visualize_flow_from_data(val_data_tuple, model,
                                                                                     device=args.device,
                                                                                     dist_type=args.dist_metric,
                                                                                     test_num=args.test_num,
