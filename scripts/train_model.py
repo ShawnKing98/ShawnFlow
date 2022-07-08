@@ -29,7 +29,7 @@ torch.manual_seed(0)
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', type=int, default=2**8)
+    parser.add_argument('--batch-size', type=int, default=2**4)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print-epochs', type=int, default=20)
     parser.add_argument('--condition-prior', type=bool, default=False)
@@ -50,7 +50,7 @@ def parse_arguments():
     # parser.add_argument('--logging', action='store_true')
     # parser.add_argument('--name', type=str, required=True)
     # parser.add_argument('--use-vae', action='store_true')
-    parser.add_argument('--data-file', type=str, default="../data/training_traj/full_disk_2d_with_contact_env_3/full_disk_2d_with_contact_env_3.npz", help="training data")
+    parser.add_argument('--data-file', type=str, default="../data/training_traj/full_disk_2d_with_contact_env_1/full_disk_2d_with_contact_env_1.npz", help="training data")
     parser.add_argument('--checkpoint', type=str, default=None)
     parser.add_argument('--last-epoch', type=int, default=0)
     parser.add_argument('--action-noise', type=float, default=0.1)
@@ -58,8 +58,8 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='msar')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_mul_scale_3', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='multi scale flow with bigger dataset', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_2d_mul_scale_4', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='data pre-rotation added', help="any additional information")
     # parser.add_argument('--vae-flow-prior', action='store_true')
     # parser.add_argument('--supervised', action='store_true')
     # parser.add_argument('--load-vae', type=str, default=None)
@@ -112,17 +112,17 @@ def train_model(model, dataloader, args, backprop=True):
             # image = image.unsqueeze(1).repeat(1, N, 1, 1, 1)
             image = image.reshape(-1, *image.shape[-3:]).to(args.device)
             t2 = time.time()
-            model_return = model(start_state, action, image, reconstruct=True, reverse=True, traj=traj, contact_flag=contact_flag)
+            model_return = model(start_state, action, image, reconstruct=False, reverse=True, traj=traj, contact_flag=contact_flag)
             z, log_prob, image_reconstruct = model_return[0], model_return[1], model_return[2]
             loss1 = -log_prob.mean()
-            loss2 = nn.functional.mse_loss(image_reconstruct, image)
+            # loss2 = nn.functional.mse_loss(image_reconstruct, image)
             # loss = -log_prob.mean() + 1000*nn.functional.mse_loss(image_reconstruct, image)
             loss3 = 0
             if args.contact_dim is not None:
                 pred_contact_score = model_return[3]
                 loss3 = F.binary_cross_entropy_with_logits(pred_contact_score, contact_flag)
                 contact_prediction_accuracy.append(((pred_contact_score > 0) == contact_flag).float().mean().item())
-            loss = loss1 + 0*loss2 + 5*loss3
+            loss = loss1 + 5*loss3
             t3 = time.time()
         losses.append(loss.item())
         if backprop:

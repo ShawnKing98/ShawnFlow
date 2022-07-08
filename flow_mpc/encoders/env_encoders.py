@@ -1,4 +1,5 @@
 import torch
+import torchvision
 from torch import nn
 from torch.nn import functional as F
 from flow_mpc.flows.image_flows import ImageFlow
@@ -66,8 +67,26 @@ class Encoder(nn.Module):
         self.decoder_2.append(nn.ConvTranspose2d(32, 1, 3, stride=1, padding=1))
         self.decoder_2 = nn.Sequential(*self.decoder_2)
 
-    def encode(self, image):
-        return self.encoder(image)
+    def encode(self, image, angle=None):
+        """
+        Encode the image. If angle is not None, the image after CNN layers will be rotated by the given angle before fed into the rest MLP
+        :param image: a tensor of shape (B/N, channel, height, width)
+        :param angle: a tensor of shape (B,)
+        :return image_context: a tensor of shape (B/N, env_dim) or (B, env_dim), depending on whether angle is None
+        """
+        if angle is None:
+            image_context = self.encoder(image)
+        else:
+            assert type(self.encoder[10]) is nn.Flatten
+            angle = angle / torch.pi * 180
+            image_context = self.encoder[0:10](image)
+            N = angle.shape[0] // image.shape[0]
+            image_context = image_context.unsqueeze(0).repeat(N, 1, 1, 1, 1).transpose(0, 1).reshape(-1, *image_context.shape[1:])
+            new_image_context = image_context.clone()
+            for i, single_image_context in enumerate(image_context):
+                new_image_context[i] = torchvision.transforms.functional.rotate(single_image_context, angle[i].item())
+            image_context = self.encoder[10:](new_image_context)
+        return image_context
 
     def reconstruct(self, z):
         image = self.decoder_1(z)

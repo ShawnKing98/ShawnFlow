@@ -4,6 +4,7 @@ import numpy as np
 from typing import List, Tuple
 from torch.utils.data import DataLoader
 import random
+import matplotlib.pyplot as plt
 
 
 class TrajectoryDataset(torch.utils.data.Dataset):
@@ -91,9 +92,7 @@ if __name__ == "__main__":
     S = TrajectoryDataset(data_tuple, 2)
     S = TrajectoryImageDataset(data_tuple, 20, with_contact=True)
     loader = DataLoader(S, batch_size=512, shuffle=True)
-    print(S[23])
-    for data in loader:
-        print(len(data))
+    ii = S[23][-1][0]
     # del data_tuple
     # import time
     # l = []
