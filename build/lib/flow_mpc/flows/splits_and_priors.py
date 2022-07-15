@@ -231,9 +231,9 @@ class SplitFlow(nn.Module):
 
     def forward(self, z, logpx, context=None, reverse=False):
         B = z.shape[0]
-        if reverse:
+        if reverse:     # training
             z, z_split = z[:, :-self.z_split_dim], z[:, -self.z_split_dim:]
-        else:
+        else:           # sampling
             z_split = self.prior.rsample(sample_shape=(B, self.z_split_dim)).to(z.device)
             z = torch.cat([z, z_split], dim=1)
         logpx += self.prior.log_prob(z_split).reshape(B, -1).sum(dim=1)

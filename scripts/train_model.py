@@ -29,21 +29,22 @@ torch.manual_seed(0)
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', type=int, default=2**4)
+    parser.add_argument('--batch-size', type=int, default=2**8)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print-epochs', type=int, default=20)
-    parser.add_argument('--condition-prior', type=bool, default=False)
+    parser.add_argument('--condition-prior', type=bool, default=True)
     parser.add_argument('--with-image', type=bool, default=True)
     parser.add_argument('--state-dim', type=int, default=4)
     parser.add_argument('--control-dim', type=int, default=2)
     parser.add_argument('--env-dim', type=int, default=64)
     parser.add_argument('--double-flow', type=bool, default=False, help="whether to enable the double flow architecture")
     parser.add_argument('--with-contact', type=bool, default=True)
+    parser.add_argument('--pre-rotation', type=bool, default=False)
     parser.add_argument('--contact-dim', type=int, default=None, help="the contact status dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--hidden-dim', type=int, default=256)
-    parser.add_argument('--flow-length', type=int, default=10)
+    parser.add_argument('--flow-length', type=int, default=0)
     # parser.add_argument('--use-true-grad', action='store_true')
     parser.add_argument('--device', type=str, default='cuda:0')
     # parser.add_argument('--multi-gpu', action='store_true')
@@ -56,10 +57,10 @@ def parse_arguments():
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
-    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='msar')
+    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_mul_scale_4', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='data pre-rotation added', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_naive_mlp', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='simple mlp (conditional prior with 0 flow length)', help="any additional information")
     # parser.add_argument('--vae-flow-prior', action='store_true')
     # parser.add_argument('--supervised', action='store_true')
     # parser.add_argument('--load-vae', type=str, default=None)
@@ -230,7 +231,8 @@ if __name__ == "__main__":
                                          hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
                                          state_mean=state_mean, state_std=state_std, action_mean=action_mean, action_std=action_std,
                                          image_mean=image_mean, image_std=image_std, flow_mean=state_mean, flow_std=state_std,
-                                         flow_type=args.flow_type, with_contact=False, env_dim=args.env_dim, contact_dim=args.contact_dim).float()
+                                         flow_type=args.flow_type, with_contact=False, env_dim=args.env_dim,
+                                         contact_dim=args.contact_dim, pre_rotation=args.pre_rotation).float()
     else:
         model = flows.DoubleImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                            hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,

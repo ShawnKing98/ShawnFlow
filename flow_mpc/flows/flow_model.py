@@ -129,14 +129,19 @@ def build_multi_scale_autoregressive_flow(state_dim, action_dim, channel_num, ho
             ))
         if i != 0 and not forward_flag:
             # mask out the future action input
-            context_mask = (context_order <= current_horizon)
             if condition_prior:
+                context_mask = (context_order <= current_horizon)
                 flow_list.append(flows.ConditionalSplitFlow(z_dim=current_horizon*channel_num + channel_num,
                                                             z_split_dim=channel_num,
-                                                            context_dim=context_mask.sum(), hidden_dim=hidden_dim,
+                                                            context_dim=int(context_mask.sum()), hidden_dim=hidden_dim,
                                                             context_mask=context_mask))
             else:
-                flow_list.append(flows.SplitFlow(z_split_dim=channel_num))
+                # flow_list.append(flows.SplitFlow(z_split_dim=channel_num))
+                context_mask = torch.zeros_like(context_order)
+                flow_list.append(flows.ConditionalSplitFlow(z_dim=current_horizon * channel_num + channel_num,
+                                                            z_split_dim=channel_num,
+                                                            context_dim=int(context_mask.sum()), hidden_dim=hidden_dim,
+                                                            context_mask=context_mask))
             current_horizon += 1
         flow_list.append(flows.MaskedAutoRegressiveLayer(horizon=current_horizon, channel=channel_num,
                                                          context_order=context_order, intermediate_dim=hidden_dim))
@@ -289,7 +294,8 @@ class ImageFlowModel(nn.Module):
     """The dynamics model based on normalizing flow, along with an extra encoder to encode environment image"""
     def __init__(self, state_dim, action_dim, horizon, image_size: Tuple[int, int],
                  env_dim=64, hidden_dim=256, flow_length=10, condition=True, initialized=False,
-                 flow_type='autoregressive', with_contact=False, relative_displacement=True, contact_dim=None,
+                 flow_type='autoregressive', with_contact=False, relative_displacement=True,
+                 contact_dim=None, pre_rotation=False,
                  state_mean=None, state_std=None,
                  action_mean=None, action_std=None,
                  image_mean=None, image_std=None,
@@ -302,6 +308,7 @@ class ImageFlowModel(nn.Module):
         :param with_contact: whether to take contact flags as model input
         :param relative_displacement: whether to use relative displacement as flow i/o (model i/o not influenced)
         :param contact_dim: the contact flag dimension at one timestamp. None means binary classification in latent space not enabled
+        :param pre_rotation: whether to rotation the context variables in prior
         """
         super(ImageFlowModel, self).__init__()
         self.flow_type = flow_type
@@ -312,6 +319,7 @@ class ImageFlowModel(nn.Module):
         self.image_size = image_size
         self.env_dim = env_dim
         self.relative_displacement = relative_displacement
+        self.pre_rotation = pre_rotation
         self.register_buffer('state_mean', torch.tensor(state_mean, dtype=torch.float) if state_mean is not None else torch.zeros(state_dim))
         self.register_buffer('state_std', torch.tensor(state_std, dtype=torch.float) if state_std is not None else torch.ones(state_dim))
         self.register_buffer('action_mean', torch.tensor(action_mean, dtype=torch.float) if action_mean is not None else torch.zeros(action_dim))
@@ -380,15 +388,17 @@ class ImageFlowModel(nn.Module):
         :return reconstructed image that has the same shape as input image
         :return predicted contact flag scores of shape (B, horizon x contact_dim, 2)
         """
-        angle = torch.atan2(start_state[:, 3], start_state[:, 2])
-        state_forward_rotation = self.get_rotation_matrix(angle, self.state_dim)
-        action_forward_rotation = self.get_rotation_matrix(angle, self.action_dim)
-        state_backward_rotation = self.get_rotation_matrix(-angle, self.state_dim)
         start_state = (start_state - self.state_mean) / self.state_std
         action = (action - self.action_mean) / self.action_std
         image = (image - self.image_mean) / self.image_std
-        start_state = (state_forward_rotation @ start_state.unsqueeze(-1)).squeeze(-1)
-        action = (action_forward_rotation.unsqueeze(1) @ action.unsqueeze(-1)).squeeze(-1)
+        angle = None
+        if self.pre_rotation:
+            angle = -torch.atan2(start_state[:, 3], start_state[:, 2])
+            state_forward_rotation = self.get_rotation_matrix(angle, self.state_dim)
+            action_forward_rotation = self.get_rotation_matrix(angle, self.action_dim)
+            state_backward_rotation = self.get_rotation_matrix(-angle, self.state_dim)
+            start_state = (state_forward_rotation @ start_state.unsqueeze(-1)).squeeze(-1)
+            action = (action_forward_rotation.unsqueeze(1) @ action.unsqueeze(-1)).squeeze(-1)
         batch_size = start_state.shape[0]
         env_code = self.encoder.encode(image, angle=angle)   # shape of (B/N, env_dim)
         if reconstruct:
@@ -412,7 +422,8 @@ class ImageFlowModel(nn.Module):
                 traj = start_state.unsqueeze(1) + torch.cumsum(relative_displacement, dim=1)
             else:
                 traj = x.reshape(batch_size, -1, self.state_num)
-            traj = (state_backward_rotation.unsqueeze(1) @ traj.unsqueeze(-1)).squeeze(-1)
+            if self.pre_rotation:
+                traj = (state_backward_rotation.unsqueeze(1) @ traj.unsqueeze(-1)).squeeze(-1)
             traj = traj * self.flow_std + self.flow_mean
             contact_prediction_score = self.latent_classifier(z) if hasattr(self, "latent_classifier") else None
             return traj, log_prob + ldj, image_reconstruct, contact_prediction_score
@@ -421,7 +432,8 @@ class ImageFlowModel(nn.Module):
             noise_magnitude = torch.rand((batch_size, 1), dtype=context.dtype, device=context.device) * 2 - 1   # (-1, 1)
             context = torch.cat((context, noise_magnitude), dim=1)
             traj = (traj - self.flow_mean) / self.flow_std
-            traj = (state_forward_rotation.unsqueeze(1) @ traj.unsqueeze(-1)).squeeze(-1)
+            if self.pre_rotation:
+                traj = (state_forward_rotation.unsqueeze(1) @ traj.unsqueeze(-1)).squeeze(-1)
             traj_noise = torch.randn(traj.shape, dtype=traj.dtype, device=traj.device) * noise_magnitude.abs().unsqueeze(-1)
             traj = traj + traj_noise
             if self.relative_displacement:
