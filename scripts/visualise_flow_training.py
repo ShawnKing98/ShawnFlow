@@ -33,7 +33,7 @@ def parse_args():
     # parser.add_argument('--name', type=str, required=True)
     parser.add_argument('--test-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_2d_mul_scale_6")
+    parser.add_argument('--flow-name', type=str, default="disk_naive_mlp")
     parser.add_argument('--use-data', type=bool, default=True)
     # parser.add_argument('--data-file', type=str, default='../data/training_traj/single_disk_2d_env_2/single_disk_2d_env_2.npz')
     # parser.add_argument('--condition-prior', type=bool, default=True)
