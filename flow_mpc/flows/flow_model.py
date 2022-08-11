@@ -305,7 +305,7 @@ class ImageFlowModel(nn.Module):
         Explanation about some flag parameters
         :param condition: whether to enable conditional prior
         :param initialized: Actnorm layers initialization status
-        :param with_contact: whether to take contact flags as model input
+        :param with_contact: whether to take contact flags as model input (deprecated)
         :param relative_displacement: whether to use relative displacement as flow i/o (model i/o not influenced)
         :param contact_dim: the contact flag dimension at one timestamp. None means binary classification in latent space not enabled
         :param pre_rotation: whether to rotation the context variables in prior
@@ -313,6 +313,7 @@ class ImageFlowModel(nn.Module):
         super(ImageFlowModel, self).__init__()
         self.flow_type = flow_type
         self.contact_input = with_contact
+        self.contact_dim = contact_dim
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.horizon = horizon
@@ -328,17 +329,17 @@ class ImageFlowModel(nn.Module):
         self.register_buffer('image_std', torch.tensor(image_std, dtype=torch.float) if image_std is not None else torch.ones(()))
         self.register_buffer('flow_mean', torch.tensor(flow_mean, dtype=torch.float) if flow_mean is not None else torch.zeros((state_dim)))
         self.register_buffer('flow_std', torch.tensor(flow_std, dtype=torch.float) if flow_std is not None else torch.ones((state_dim)))
+
+        extra_context_order = torch.arange(horizon).repeat(contact_dim, 1).T.reshape(-1) if contact_dim else None
         if flow_type == 'nvp':
             self.flow = build_realnvp_flow(flow_dim=state_dim * horizon,
                                            context_dim=state_dim + action_dim * horizon + env_dim + 1,
                                            flow_length=flow_length, hidden_dim=hidden_dim, initialized=initialized)
         elif flow_type == 'autoregressive':
-            extra_context_order = torch.arange(horizon) if with_contact else None
             self.flow = build_autoregressive_flow(state_dim=state_dim, action_dim=action_dim, channel_num=state_dim,
                                                   horizon=horizon, env_dim=env_dim, flow_length=flow_length,
                                                   hidden_dim=hidden_dim, initialized=initialized, extra_context_order=extra_context_order)
         elif flow_type == 'msar':
-            extra_context_order = torch.arange(horizon) if with_contact else None
             self.flow = build_multi_scale_autoregressive_flow(state_dim=state_dim, action_dim=action_dim, channel_num=state_dim,
                                                               horizon=horizon, env_dim=env_dim, hidden_dim=hidden_dim,
                                                               initialized=initialized, extra_context_order=extra_context_order,
@@ -368,7 +369,8 @@ class ImageFlowModel(nn.Module):
         #                                  )
         # self.s_u_encoder.requires_grad_(False)
         if contact_dim is not None:
-            self.latent_classifier = BinaryClassifier(state_dim*horizon, contact_dim*horizon, hidden_dim)
+            self.latent_classifier = BinaryClassifier(state_dim*initial_horizon + state_dim + action_dim*horizon + env_dim,
+                                                      contact_dim*horizon, hidden_dim)
 
     def forward(self, start_state: torch.Tensor, action: torch.Tensor, image: torch.Tensor, reconstruct=False, reverse=False, traj=None, contact_flag=None):
         """
@@ -382,11 +384,11 @@ class ImageFlowModel(nn.Module):
         :param reconstruct: whether or not to reconstruct the original image
         :param reverse: False means sampling and using this model, True means using passed-in trajectory to get the latent variable and its prob
         :param traj: torch tensor of shape (B, horizon, channel_num)
-        :param contact_flag: torch tensor of shape (B, horizon) OR None
+        :param contact_flag: torch tensor of shape (B, contact_dim*horizon) OR None
         :return predicted_traj of shape (B, horizon, channel_num) OR latent variable of shape (B, horizon x channel_num) depending on reverse or not
         :return log probability of sampling the trajectory of shape (B,)
         :return reconstructed image that has the same shape as input image
-        :return predicted contact flag scores of shape (B, horizon x contact_dim, 2)
+        :return predicted contact flag scores of shape (B, horizon*contact_dim, 2)
         """
         start_state = (start_state - self.state_mean) / self.state_std
         action = (action - self.action_mean) / self.action_std
@@ -407,15 +409,22 @@ class ImageFlowModel(nn.Module):
             image_reconstruct = None
         N = start_state.shape[0] // env_code.shape[0]
         env_code = env_code.unsqueeze(0).repeat(N, 1, 1).transpose(0, 1).reshape(-1, env_code.shape[1])
-        if not self.contact_input:
-            context = torch.cat((start_state, action.reshape(batch_size, -1), env_code), dim=1)
-        else:
-            assert contact_flag is not None
-            context = torch.cat((start_state, action.reshape(batch_size, -1), env_code, contact_flag), dim=1)
+        context = torch.cat((start_state, action.reshape(batch_size, -1), env_code), dim=1)
+        # if not self.contact_dim:
+        #     context = torch.cat((start_state, action.reshape(batch_size, -1), env_code), dim=1)
+        # else:
+        #     assert contact_flag is not None
+        #     context = torch.cat((start_state, action.reshape(batch_size, -1), env_code, contact_flag), dim=1)
         if not reverse:     # sampling
+            z, log_prob = self.prior(z=None, logpx=0, context=context, reverse=reverse)
+            contact_prediction_score = None
+            if hasattr(self, "latent_classifier"):
+                classifier_input = torch.cat((z, context), dim=1)
+                contact_prediction_score = self.latent_classifier(classifier_input)
+                contact_prediction = ((contact_prediction_score > 0).float() - 0.5) * 2
+                context = torch.cat((context, contact_prediction), dim=1)
             noise_magnitude = context.new_zeros(batch_size, 1)
             context = torch.cat((context, noise_magnitude), dim=1)
-            z, log_prob = self.prior(z=None, logpx=0, context=context, reverse=reverse)
             x, ldj = self.flow(z, logpx=0, context=context, reverse=reverse)
             if self.relative_displacement:
                 relative_displacement = x.reshape(batch_size, -1, self.state_dim)
@@ -425,10 +434,15 @@ class ImageFlowModel(nn.Module):
             if self.pre_rotation:
                 traj = (state_backward_rotation.unsqueeze(1) @ traj.unsqueeze(-1)).squeeze(-1)
             traj = traj * self.flow_std + self.flow_mean
-            contact_prediction_score = self.latent_classifier(z) if hasattr(self, "latent_classifier") else None
+
             return traj, log_prob + ldj, image_reconstruct, contact_prediction_score
         else:           # training
             assert traj is not None
+            if self.contact_dim:
+                classifier_input = context.clone()
+                assert contact_flag is not None
+                contact_flag = (contact_flag - 0.5) * 2
+                context = torch.cat((context, contact_flag), dim=1)
             noise_magnitude = torch.rand((batch_size, 1), dtype=context.dtype, device=context.device) * 2 - 1   # (-1, 1)
             context = torch.cat((context, noise_magnitude), dim=1)
             traj = (traj - self.flow_mean) / self.flow_std
@@ -445,7 +459,7 @@ class ImageFlowModel(nn.Module):
             z, ldj = self.flow(x, logpx=0, context=context, reverse=reverse)
             # z, ldj = x, 0
             z, log_prob = self.prior(z=z, logpx=ldj, context=context, reverse=reverse)
-            contact_prediction_score = self.latent_classifier(z) if hasattr(self, "latent_classifier") else None
+            contact_prediction_score = self.latent_classifier(torch.cat((z, classifier_input), dim=1)) if hasattr(self, "latent_classifier") else None
             return z, log_prob, image_reconstruct, contact_prediction_score
 
     def get_rotation_matrix(self, angle: torch.Tensor, state_num: int = None):
