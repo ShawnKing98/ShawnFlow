@@ -84,7 +84,7 @@ class TrajectoryImageDataset(TrajectoryDataset):
         # image = self.image[idx//self.sample_per_env]
         image = self.image[idx]     # shape (channel, height, width)
 
-        return *items, image
+        return (*items, image)
 
 if __name__ == "__main__":
     data_tuple = dict(np.load('../data/training_traj/full_disk_2d_with_contact_env_1/full_disk_2d_with_contact_env_1.npz'))

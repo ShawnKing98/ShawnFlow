@@ -92,19 +92,19 @@ class DiskEntityObservables(composer.Observables):
 
 
 class MazeEntity(composer.Entity):
-    def _build(self, obstacle_num=10, fixed_obstacle=False):
+    def _build(self, obstacle_num=0, fixed_obstacle=False):
         self._model = mjcf.RootElement()
         self._obstacle_num = obstacle_num
         self.fixed_obstacle = fixed_obstacle
         self._rgba = [0.2, 0.2, 0.2, 1]
-        self._model.worldbody.add('geom', name='left_wall', type='box', size=[0.01, 0.72, 0.1], pos=[-0.71, 0, 0.1],
-                                  rgba=self._rgba)
-        self._model.worldbody.add('geom', name='up_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, 0.71, 0.1],
-                                  rgba=self._rgba)
-        self._model.worldbody.add('geom', name='down_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, -0.71, 0.1],
-                                  rgba=self._rgba)
-        self._model.worldbody.add('geom', name='right_wall', type='box', size=[0.01, 0.72, 0.1], pos=[0.71, 0, 0.1],
-                                  rgba=self._rgba)
+        # self._model.worldbody.add('geom', name='left_wall', type='box', size=[0.01, 0.72, 0.1], pos=[-0.71, 0, 0.1],
+        #                           rgba=self._rgba)
+        # self._model.worldbody.add('geom', name='up_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, 0.71, 0.1],
+        #                           rgba=self._rgba)
+        # self._model.worldbody.add('geom', name='down_wall', type='box', size=[0.72, 0.01, 0.1], pos=[0.0, -0.71, 0.1],
+        #                           rgba=self._rgba)
+        # self._model.worldbody.add('geom', name='right_wall', type='box', size=[0.01, 0.72, 0.1], pos=[0.71, 0, 0.1],
+        #                           rgba=self._rgba)
         self.reset_obstacles()
 
     def reset_obstacles(self, random_state=None):

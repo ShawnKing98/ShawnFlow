@@ -12,6 +12,8 @@ from flow_mpc.controllers import RandomController
 # from flow_mpc.models import QuadcopterModel, DoubleIntegratorModel, VictorModel
 from flow_mpc.models import DoubleIntegratorModel
 
+PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', default='disk_2d')
@@ -19,22 +21,21 @@ def parse_args():
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--friction-noise', type=float, default=0.1)
     parser.add_argument('--action-range', type=float, default=10.)
-    parser.add_argument('--N', type=int, default=50000, help='the number of environments')
+    parser.add_argument('--N', type=int, default=10000, help='the number of environments')
     parser.add_argument('--samples-per-env', type=int, default=10, help='the number of sampled trajectories per environment')
     parser.add_argument('--fix-obstacle', action='store_true')
-    parser.add_argument('--name', type=str, default='full_disk_2d_with_contact_env_3')
+    parser.add_argument('--name', type=str, default='disk_2d_freespace')
     parser.add_argument('--H', type=int, default=40, help='time horizon')
-    parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--controller', type=str, default="random")
-    parser.add_argument('--remark', type=str, default='larger dataset (50,000 environments)', help="any additional information")
+    parser.add_argument('--remark', type=str, default='disk 2d env in free space', help="any additional information")
     args = parser.parse_args()
 
     args.env = args.env.lower()
     for (arg, value) in args._get_kwargs():
         print(f"{arg}: {value}")
-    if not os.path.exists("../data/training_traj/" + args.name):
-        os.makedirs("../data/training_traj/" + args.name)
-    with open("../data/training_traj/" + args.name + "/args.txt", 'w') as f:
+    if not os.path.exists(os.path.join(PROJ_PATH, "data", "training_traj", args.name)):
+        os.makedirs(os.path.join(PROJ_PATH, "data", "training_traj", args.name))
+    with open(os.path.join(PROJ_PATH, "data", "training_traj", args.name, "args.json"), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
     return args
 
@@ -91,9 +92,9 @@ def generate_disk_dataset(env, num_environments, samples_per_env, controller=Non
             data['U'].append(np.stack(control_sequences, axis=0))
             data['views'].append(views)
             data['contact'].append(contact_flags)
-        except:
+        except Exception as e:
             i -= 1
-            print("Environment broken!")
+            print(f"Environment broken due to {e}")
 
     stacked_data = {}
     for key, item in data.items():
@@ -173,7 +174,7 @@ if __name__ == '__main__':
     elif args.env == 'rope_2d':
         env = Environment(RopeManipulation(friction_noise=args.friction_noise))
         control_dim = 2
-        state_dim = 22
+        state_dim = 2*11
     else:
         raise ValueError(f'Env {args.env} not specified appropriately')
 
@@ -194,6 +195,7 @@ if __name__ == '__main__':
 
     for key, value in data.items():
         print(key, value.shape)
-
-    np.savez(f"../data/training_traj/{args.name}/{args.name}", **data)
-    print(f"Saved to {args.name}.npz")
+    os.path.join(PROJ_PATH, "data", "training_traj", args.name)
+    np.savez(os.path.join(PROJ_PATH, "data", "training_traj", args.name), **data)
+    # np.savez(f"../data/training_traj/{args.name}/{args.name}", **data)
+    print(f'Saved to {os.path.join(PROJ_PATH, "data", "training_traj", args.name)}')
