@@ -44,6 +44,7 @@ def parse_arguments():
     parser.add_argument('--contact-dim', type=int, default=1, help="the contact status dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
+    parser.add_argument('--weight-decay', type=float, default=1e-2)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--flow-length', type=int, default=10)
     parser.add_argument('--device', type=str, default='cuda')
@@ -55,8 +56,8 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_unconditional_autoregressive_1', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='ar flow with unconditional prior and latent classifier', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_unconditional_autoregressive_2', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='ar flow with unconditional prior and latent classifier, with 0.01 weight decay', help="any additional information")
 
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
@@ -72,6 +73,7 @@ def train_model(model, dataloader, args, backprop=True):
     tik = t0
     losses = []
     contact_prediction_accuracy = []
+    traj_prediction_error = []
     for data in dataloader:
         t1 = time.time()
         # Without image
@@ -99,17 +101,21 @@ def train_model(model, dataloader, args, backprop=True):
             # image = image.unsqueeze(1).repeat(1, N, 1, 1, 1)
             image = image.reshape(-1, *image.shape[-3:]).to(args.device)
             t2 = time.time()
-            model_return = model(start_state, action, image, reconstruct=False, reverse=True, traj=traj, contact_flag=contact_flag)
-            z, log_prob, image_reconstruct = model_return[0], model_return[1], model_return[2]
+            train_return = model(start_state, action, image, reconstruct=False, reverse=True, traj=traj, contact_flag=contact_flag)
+            z, log_prob, image_reconstruct = train_return["z"], train_return["logp"], train_return["image_reconstruct"]
             loss1 = -log_prob.mean()
             # loss2 = nn.functional.mse_loss(image_reconstruct, image)
             # loss = -log_prob.mean() + 1000*nn.functional.mse_loss(image_reconstruct, image)
             loss3 = 0
-            if args.contact_dim is not None:
-                pred_contact_score = model_return[3]
+            if "contact_logit" in train_return:
+                pred_contact_score = train_return["contact_logit"]
                 loss3 = F.binary_cross_entropy_with_logits(pred_contact_score, contact_flag)
                 contact_prediction_accuracy.append(((pred_contact_score > 0) == contact_flag).float().mean().item())
             loss = loss1 + 5*loss3
+            with torch.no_grad():
+                pred_return = model(start_state, action, image, reconstruct=False, reverse=False)
+                dist = utils.calc_traj_dist(pred_return["traj"], traj, metric=args.dist_metric)
+                traj_prediction_error.append(dist)
             t3 = time.time()
         losses.append(loss.item())
         if backprop:
@@ -122,6 +128,7 @@ def train_model(model, dataloader, args, backprop=True):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
         t4 = time.time()
         tt = np.array([t0, t1, t2, t3, t4])
         dt = tt[1:]-tt[:-1]
@@ -129,9 +136,9 @@ def train_model(model, dataloader, args, backprop=True):
         # print(f"sample batch: {dt[0]:.1f}% | move to cuda: {dt[1]:.1f}% | forward propagation: {dt[2]:.1f}% | back propagation: {dt[3]:.1f}%")
         t0 = time.time()
     tok = time.time()
-    info = {'loss': sum(losses)/len(losses), 'time': tok-tik}
+    info = {'loss': sum(losses)/len(losses), 'time': tok-tik, 'traj_error': sum(traj_prediction_error)/len(traj_prediction_error)}
     if len(contact_prediction_accuracy) > 0:
-        info['contact_prediction_accuracy'] = sum(contact_prediction_accuracy) / len(contact_prediction_accuracy)
+        info['contact_acc'] = sum(contact_prediction_accuracy) / len(contact_prediction_accuracy)
     # print(f"train one epoch: {tok-tik} sec.")
     return info
 
@@ -231,7 +238,7 @@ if __name__ == "__main__":
     model.to(args.device)
     model.train()
     print(f"The number of the model's trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     if args.checkpoint is not None:
         path = os.path.join(PROJ_PATH, "data", "flow_model", args.checkpoint)
         utils.load_checkpoint(model, optimizer, path, args.device)
@@ -242,29 +249,35 @@ if __name__ == "__main__":
     for epoch in range(args.last_epoch, args.epochs):
         train_info = train_model(model, train_dataloader, args)
         writer.add_scalar('epoch/train loss', train_info['loss'], epoch)
-        contact_pred_acc = train_info['contact_prediction_accuracy'] if 'contact_prediction_accuracy' in train_info.keys() else 0
-        print(f"epoch: {epoch} | loss: {train_info['loss']} | contact pred acc: {100*contact_pred_acc:.1f}% | time: {train_info['time']:.1f} sec. ")
+        writer.add_scalar('epoch/train traj error', train_info['traj_error'], epoch)
+        train_contact_acc = train_info['contact_acc'] if 'contact_acc' in train_info else 0
+        writer.add_scalar('epoch/train contact acc', train_contact_acc, epoch)
+        print(f"epoch: {epoch} | loss: {train_info['loss']:.3g} | traj error: {train_info['traj_error']:.3f} | contact pred acc: {100*train_contact_acc:.1f}% | time: {train_info['time']:.1f} sec.")
         if epoch % args.print_epochs == 0:
             # dist, std_true, std_pred, prior_std = visualize_fn(env, model, horizon=args.horizon, dist_type=args.dist_metric, title=args.name)
-            if "disk" in args.name:
-                dist, std_true, std_pred, prior_std = visualize_flow_from_data(data=val_data_tuple, flow=model, device=args.device,
-                                                                               dist_type=args.dist_metric, horizon=args.horizon,
-                                                                               with_contact=args.with_contact, with_image=args.with_image)
-            elif "rope" in args.name:
-                dist, std_true, std_pred, prior_std = visualize_rope_2d_from_data(data=val_data_tuple, flow=model, device=args.device,
-                                                                                  dist_type=args.dist_metric, horizon=args.horizon)
-            prior_std = prior_std.mean()
+            # if "disk" in args.name:
+            #     dist, std_true, std_pred, prior_std = visualize_flow_from_data(data=val_data_tuple, flow=model, device=args.device,
+            #                                                                    dist_type=args.dist_metric, horizon=args.horizon,
+            #                                                                    with_contact=args.with_contact, with_image=args.with_image)
+            # elif "rope" in args.name:
+            #     dist, std_true, std_pred, prior_std = visualize_rope_2d_from_data(data=val_data_tuple, flow=model, device=args.device,
+            #                                                                       dist_type=args.dist_metric, horizon=args.horizon)
+            # prior_std = prior_std.mean()
             eval_info = eval_model(model, validate_dataloader, args)
-            writer.add_scalar('epoch/trajectory prediction error', dist, epoch)
-            writer.add_scalar('epoch/true traj std', std_true, epoch)
-            writer.add_scalar('epoch/pred traj std', std_pred, epoch)
-            writer.add_scalar('epoch/prior log std', prior_std, epoch)
-            if 'contact_prediction_accuracy' in eval_info.keys():
-                writer.add_scalar('epoch/contact prediction accuracy', eval_info['contact_prediction_accuracy'], epoch)
+            test_contact_acc = eval_info['contact_acc'] if 'contact_acc' in eval_info else 0
+            dist = eval_info['traj_error']
+            # writer.add_scalar('epoch/trajectory prediction error', dist, epoch)
+            # writer.add_scalar('epoch/true traj std', std_true, epoch)
+            # writer.add_scalar('epoch/pred traj std', std_pred, epoch)
+            # writer.add_scalar('epoch/prior log std', prior_std, epoch)
+            # if 'contact_acc' in eval_info.keys():
+            #     writer.add_scalar('epoch/contact prediction accuracy', eval_info['contact_acc'], epoch)
             writer.add_scalar('epoch/test loss', eval_info['loss'], epoch)
+            writer.add_scalar('epoch/test traj_error', eval_info['traj_error'], epoch)
+            writer.add_scalar('epoch/test contact acc', test_contact_acc, epoch)
             print(f"epoch: {epoch} | test loss: {eval_info['loss']:.3g} | train loss: {train_info['loss']:.3g} "
-                  + f"| contact pred acc: {100*contact_pred_acc:.1f}% "
-                  + f"| traj prediction error: {dist:.3g} | true traj std: {std_true} | pred traj std: {std_pred} | prior log std: {prior_std}")
+                  + f"| contact pred acc: {100*test_contact_acc:.1f}% "
+                  + f"| traj prediction error: {dist:.3g}")
             utils.save_checkpoint(model, optimizer, os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"))
             if dist < best_dist:
                 if best_epoch is not None:

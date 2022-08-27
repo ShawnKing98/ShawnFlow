@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 from dm_control import mjcf
-
+import numpy as np
+from frechetdist import frdist
 
 def save_checkpoint(model, optimizer, filename="my_checkpoint.pt"):
     state = {'model': model.state_dict(), 'optimizer': optimizer.state_dict()}
@@ -53,3 +54,26 @@ def average_grad(model: nn.Module):
         running_abs_grad_average = num/(num+new_num) * running_abs_grad_average + new_num/(num+new_num) * new_grad
         num += new_num
     return running_abs_grad_average
+
+def calc_traj_dist(traj1, traj2, metric="L2"):
+    """
+    Calculate the average distance between two sets of trajectories
+    :param traj1: a tensor of shape (B1, L, D)
+    :param traj2: a tensor of shape (B2, L, D)
+    :param metric: the distance metric
+    :return dist: a scalar, the average distances between two sets of trajectories
+    """
+    if metric == "L2":
+        traj1 = traj1.reshape(traj1.shape[0], -1)
+        traj2 = traj2.reshape(traj2.shape[0], -1)
+        dist = (torch.cdist(traj1, traj2, p=2).mean() / traj1.shape[1]).item()
+    elif metric == "frechet":
+        traj1 = traj1.cpu().detach().numpy()
+        traj2 = traj2.cpu().detach().numpy()
+        dist = np.zeros((traj1.shape[0], traj2.shape[0]))
+        for i in range(dist.shape[0]):
+            for j in range(dist.shape[1]):
+                dist[i, j] = frdist(traj1[i], traj2[j])
+                # print(f"frechet calculating... {i*dist.shape[0]+j}/{dist.shape[0]*dist.shape[1]}")
+        dist = dist.mean()
+    return dist
