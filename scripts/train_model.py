@@ -4,9 +4,12 @@ import os
 import time
 import ipdb
 
+# os.environ["CUDA_AVAILABLE_DEVICES"] = '1'
+
 import numpy as np
 import torch
 from tensorboardX import SummaryWriter
+import matplotlib
 import matplotlib.pyplot as plt
 from torch import autograd
 from torch.utils.data import DataLoader, IterableDataset
@@ -25,6 +28,7 @@ from dataset import TrajectoryDataset, TrajectoryImageDataset
 
 np.random.seed(0)
 torch.manual_seed(0)
+matplotlib.use('Agg')
 
 PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -44,10 +48,10 @@ def parse_arguments():
     parser.add_argument('--contact-dim', type=int, default=1, help="the contact status dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
-    parser.add_argument('--weight-decay', type=float, default=1e-2)
+    parser.add_argument('--weight-decay', type=float, default=1e-3)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--flow-length', type=int, default=10)
-    parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--device', type=str, default='cuda:2')
     parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
     parser.add_argument('--checkpoint', type=str, default=None, help="checkpoint file and its parent folder, eg: 'test_model/test_model_20.pt' ")
     parser.add_argument('--last-epoch', type=int, default=0)
@@ -56,8 +60,8 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_unconditional_autoregressive_2', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='ar flow with unconditional prior and latent classifier, with 0.01 weight decay', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_unconditional_autoregressive_6', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='loss ratio 1:1, with data balancing', help="any additional information")
 
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
@@ -103,15 +107,17 @@ def train_model(model, dataloader, args, backprop=True):
             t2 = time.time()
             train_return = model(start_state, action, image, reconstruct=False, reverse=True, traj=traj, contact_flag=contact_flag)
             z, log_prob, image_reconstruct = train_return["z"], train_return["logp"], train_return["image_reconstruct"]
-            loss1 = -log_prob.mean()
+            # loss1 = -log_prob.mean()
+            weight = F.softmax(contact_flag.sum(dim=1)/args.horizon, dim=0) if contact_flag is not None else torch.ones_like(log_prob)/len(log_prob)
+            loss1 = -weight @ log_prob
             # loss2 = nn.functional.mse_loss(image_reconstruct, image)
             # loss = -log_prob.mean() + 1000*nn.functional.mse_loss(image_reconstruct, image)
             loss3 = 0
-            if "contact_logit" in train_return:
+            if "contact_logit" in train_return and train_return["contact_logit"] is not None:
                 pred_contact_score = train_return["contact_logit"]
                 loss3 = F.binary_cross_entropy_with_logits(pred_contact_score, contact_flag)
                 contact_prediction_accuracy.append(((pred_contact_score > 0) == contact_flag).float().mean().item())
-            loss = loss1 + 5*loss3
+            loss = loss1 + loss3
             with torch.no_grad():
                 pred_return = model(start_state, action, image, reconstruct=False, reverse=False)
                 dist = utils.calc_traj_dist(pred_return["traj"], traj, metric=args.dist_metric)
@@ -214,6 +220,8 @@ if __name__ == "__main__":
                                       shuffle=True, num_workers=num_worker)
         validate_dataloader = DataLoader(TrajectoryImageDataset(val_data_tuple, args.horizon, with_contact=args.with_contact), batch_size=args.batch_size,
                                          shuffle=True, num_workers=num_worker)
+    args.contact_ratio = train_dataloader.dataset.contact_flag.sum()/train_dataloader.dataset.contact_flag.numel()
+    print(f"contact flag ratio: {args.contact_ratio.item()}")
     del train_data_tuple
     # del val_data_tuple
 

@@ -78,6 +78,7 @@ class TrajectoryImageDataset(TrajectoryDataset):
         self.image = torch.tensor(data_tuple[3], dtype=torch.float, device=device)     # shape (E, channel, height, width)
         if self.image.dim() < 4:
             self.image.unsqueeze_(1)        # create channel dimension if needed
+        print(f"The shape of image: {self.image.shape}")
 
     def __getitem__(self, idx):
         items = super(TrajectoryImageDataset, self).__getitem__(idx)

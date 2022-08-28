@@ -24,10 +24,10 @@ def parse_args():
     parser.add_argument('--N', type=int, default=10000, help='the number of environments')
     parser.add_argument('--samples-per-env', type=int, default=10, help='the number of sampled trajectories per environment')
     parser.add_argument('--fix-obstacle', action='store_true')
-    parser.add_argument('--name', type=str, default='disk_2d_freespace')
+    parser.add_argument('--name', type=str, default='disk_2d_walls')
     parser.add_argument('--H', type=int, default=40, help='time horizon')
     parser.add_argument('--controller', type=str, default="random")
-    parser.add_argument('--remark', type=str, default='disk 2d env in free space', help="any additional information")
+    parser.add_argument('--remark', type=str, default='disk 2d env with only walls', help="any additional information")
     args = parser.parse_args()
 
     args.env = args.env.lower()
@@ -195,7 +195,6 @@ if __name__ == '__main__':
 
     for key, value in data.items():
         print(key, value.shape)
-    os.path.join(PROJ_PATH, "data", "training_traj", args.name)
-    np.savez(os.path.join(PROJ_PATH, "data", "training_traj", args.name), **data)
+    np.savez(os.path.join(PROJ_PATH, "data", "training_traj", args.name, args.name), **data)
     # np.savez(f"../data/training_traj/{args.name}/{args.name}", **data)
-    print(f'Saved to {os.path.join(PROJ_PATH, "data", "training_traj", args.name)}')
+    print(f'Saved to {os.path.join(PROJ_PATH, "data", "training_traj", args.name, args.name)}')

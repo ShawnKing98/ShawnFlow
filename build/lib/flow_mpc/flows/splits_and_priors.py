@@ -87,7 +87,7 @@ class GaussianPrior(nn.Module):
     def forward(self, z, logpx, context, reverse=False):
         batch_size = context.shape[0]
         # z_mu, z_lower = self.mu, self.lower
-        z_mu, z_lower = torch.zeros(self.z_dim, device='cuda', dtype=torch.float), torch.eye(self.z_dim, device='cuda', dtype=torch.float)
+        z_mu, z_lower = torch.zeros(self.z_dim, device=context.device, dtype=torch.float), torch.eye(self.z_dim, device=context.device, dtype=torch.float)
         prior = MultivariateNormal(loc=z_mu, scale_tril=z_lower)
         if not reverse:
             if z is None:

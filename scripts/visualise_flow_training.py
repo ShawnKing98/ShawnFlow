@@ -27,6 +27,7 @@ from frechetdist import frdist
 seed = 4
 np.random.seed(seed)
 torch.manual_seed(seed)
+matplotlib.use('Agg')
 
 PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,6 +50,7 @@ def parse_args():
         if model_file[-7:-3] == "best":
             args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, model_file)
             break
+    args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_8000.pt")
     with open(os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, "args.json")) as f:
         stored_args = f.read()
     stored_args = json.loads(stored_args)
@@ -556,17 +558,13 @@ if __name__ == "__main__":
         model = DoubleImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                     hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
                                      initialized=True, flow_type=args.flow_type, env_dim=args.env_dim).float().to(args.device)
-    utils.load_checkpoint(model, filename=args.flow_path)
+    utils.load_checkpoint(model, filename=args.flow_path, device=args.device)
     model.eval()
     dist_list = []
-    # test_num = 50
     ims = []
     fig = plt.figure(1)
     ax = fig.add_subplot()
     ax.set(xlim=(-1., 1.), ylim=(-1., 1.), autoscale_on=False, aspect='equal')
-    # ax.set_xlim(-1, 1)
-    # ax.set_ylim(-1, 1)
-    # ax.axis('equal')
     plt.close(fig)
     for i in range(args.trial_num):
         # dist, std_true, std_pred, prior_std = visualize_flow(env, model, dist_type='L2', title=args.flow_path)
@@ -589,9 +587,8 @@ if __name__ == "__main__":
         # input("?")
     average_dist = np.array(dist_list).mean()
     print(f"Average Distance over {args.trial_num} tests: {average_dist}")
-    ani = animation.ArtistAnimation(fig, ims, interval=3000, repeat_delay=0)
+    ani = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=0)
     if not os.path.exists(os.path.join(PROJ_PATH, "data", "gif")):
         os.makedirs(os.path.join(PROJ_PATH, "data", "gif"))
     ani.save(os.path.join(PROJ_PATH, "data", "gif", args.flow_name+".gif"), writer='pillow')
-    # ani.save(f'../data/gif/{args.flow_name}.gif', writer='pillow')
     print(f"visualization result saved to {os.path.join(PROJ_PATH, 'data', 'gif', args.flow_name+'.gif')}")
