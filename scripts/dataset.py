@@ -78,13 +78,14 @@ class TrajectoryImageDataset(TrajectoryDataset):
         self.image = torch.tensor(data_tuple[3], dtype=torch.float, device=device)     # shape (E, channel, height, width)
         if self.image.dim() < 4:
             self.image.unsqueeze_(1)        # create channel dimension if needed
+        print(f"The shape of image: {self.image.shape}")
 
     def __getitem__(self, idx):
         items = super(TrajectoryImageDataset, self).__getitem__(idx)
         # image = self.image[idx//self.sample_per_env]
         image = self.image[idx]     # shape (channel, height, width)
 
-        return *items, image
+        return (*items, image)
 
 if __name__ == "__main__":
     data_tuple = dict(np.load('../data/training_traj/full_disk_2d_with_contact_env_1/full_disk_2d_with_contact_env_1.npz'))

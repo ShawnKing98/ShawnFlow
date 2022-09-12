@@ -1,4 +1,4 @@
-import os.path
+import os
 import pathlib
 import argparse
 import json
@@ -27,33 +27,31 @@ from frechetdist import frdist
 seed = 4
 np.random.seed(seed)
 torch.manual_seed(seed)
+matplotlib.use('Agg')
+
+PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--name', type=str, required=True)
     parser.add_argument('--test-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_2d_mul_scale_6")
+    parser.add_argument('--flow-name', type=str, default="disk_unconditional_autoregressive_2")
     parser.add_argument('--use-data', type=bool, default=True)
-    # parser.add_argument('--data-file', type=str, default='../data/training_traj/single_disk_2d_env_2/single_disk_2d_env_2.npz')
-    # parser.add_argument('--condition-prior', type=bool, default=True)
-    parser.add_argument('--action-noise', type=float, default=0.1)
-    parser.add_argument('--process-noise', type=float, default=0.000)
+    # parser.add_argument('--action-noise', type=float, default=0.1)
+    # parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--world-dim', type=int, default=2)
     parser.add_argument('--control-dim', type=int, default=2)
     parser.add_argument('--state-dim', type=int, default=4)
     parser.add_argument('--with-image', type=bool, default=False)
     parser.add_argument('--with-contact', type=bool, default=True)
     parser.add_argument('--double-flow', type=bool, default=False)
-    # parser.add_argument('--horizon', type=int, default=20, help="The length of the future state trajectory to be considered")
-    # parser.add_argument('--hidden-dim', type=int, default=256)
-    # parser.add_argument('--flow-length', type=int, default=10)
-    # parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='frechet',
-    #                     help="the distance metric between two sets of trajectory")
-    # parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
-    args.flow_path = f"../data/flow_model/{args.flow_name}/{args.flow_name}_best.pt"
-    with open(f"../data/flow_model/{args.flow_name}/args.txt") as f:
+    for model_file in os.listdir(os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name)):
+        if model_file[-7:-3] == "best":
+            args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, model_file)
+            break
+    args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_8000.pt")
+    with open(os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, "args.json")) as f:
         stored_args = f.read()
     stored_args = json.loads(stored_args)
     for (k, v) in stored_args.items():
@@ -164,16 +162,16 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
         # ipdb.set_trace()
         with torch.no_grad():
             if isinstance(flow, FlowModel):
-                pred_traj = flow(start_tensor, action)[0][:, :, 0:2]
+                pred_traj = flow(start_tensor, action)["traj"][:, :, 0:2]
                 pred_contact_state = None
             elif isinstance(flow, CouplingImageFlowModel) or isinstance(flow, DoubleImageFlowModel):
                 model_return = flow(start_tensor, action, image, reconstruct=False, contact_flag=contact_flag, output_contact=True)
-                pred_traj, pred_contact, image_reconstruct = model_return[0], model_return[1], model_return[3]
+                pred_traj, pred_contact, image_reconstruct = model_return["traj"], model_return["contact_logit"], model_return["image_reconstruct"]
                 pred_traj = pred_traj[:, :, 0:2]
                 pred_contact_state = pred_traj[pred_contact.bool()].double().cpu().detach().numpy()
             else:
                 model_return = flow(start_tensor, action, image, reconstruct=False, contact_flag=contact_flag)
-                pred_traj, image_reconstruct = model_return[0], model_return[2]
+                pred_traj, image_reconstruct = model_return["traj"], model_return["image_reconstruct"]
                 pred_traj = pred_traj[:, :, 0:2]
                 true_contact = data[4][idx, i, 0:horizon]
                 pred_contact_state = pred_traj[0][true_contact].double().cpu().detach().numpy()
@@ -246,7 +244,6 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
                 dist[i, j] = frdist(pred_traj_history[i], true_traj_history[j])
                 # print(f"frechet: {i*dist.shape[0]+j}/{dist.shape[0]*dist.shape[1]}")
         dist = dist.mean()
-        # print(f"!!!!!!!!!dist: {dist}!!!!!!!!!!!!")
     elif dist_type == "L2":
         # L2 distance
         pred_traj_history = pred_traj_history.reshape(pred_traj_history.shape[0], -1)
@@ -532,9 +529,9 @@ if __name__ == "__main__":
     args = parse_args()
     import time
     # environment
-    env = DoubleIntegratorEnv(world_dim=args.world_dim, world_type='spheres', dt=0.05, action_noise_cov=args.action_noise*np.eye(args.world_dim))
-    env_mujoco = Environment(NavigationObstacle(process_noise=args.process_noise, action_noise=args.action_noise, fixed_obstacle=False), max_reset_attempts=2)
-    data_dict = dict(np.load(args.data_file))
+    # env = DoubleIntegratorEnv(world_dim=args.world_dim, world_type='spheres', dt=0.05, action_noise_cov=args.action_noise*np.eye(args.world_dim))
+    # env_mujoco = Environment(NavigationObstacle(process_noise=args.process_noise, action_noise=args.action_noise, fixed_obstacle=False), max_reset_attempts=2)
+    data_dict = dict(np.load(os.path.join(PROJ_PATH, "data", "training_traj", args.data_file, args.data_file+".npz")))
     # data_tuple = tuple(data_dict.values())
     data_list = list(zip(*data_dict.values()))
     train_val_split = int(args.train_val_ratio * len(data_list))
@@ -546,7 +543,7 @@ if __name__ == "__main__":
     #     NavigationObstacle(process_noise=0, action_noise=1, fixed_obstacle=True),
     #     max_reset_attempts=2)
     # random controller
-    controller = RandomController(udim=args.control_dim, urange=10, horizon=args.horizon, lower_bound=[-10, -10], upper_bound=[10, 10])
+    # controller = RandomController(udim=args.control_dim, urange=10, horizon=args.horizon, lower_bound=[-10, -10], upper_bound=[10, 10])
     # flow model
     if not args.double_flow:
         if not args.with_image:
@@ -561,22 +558,18 @@ if __name__ == "__main__":
         model = DoubleImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                     hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
                                      initialized=True, flow_type=args.flow_type, env_dim=args.env_dim).float().to(args.device)
-    utils.load_checkpoint(model, filename=args.flow_path)
+    utils.load_checkpoint(model, filename=args.flow_path, device=args.device)
     model.eval()
     dist_list = []
-    # test_num = 50
     ims = []
     fig = plt.figure(1)
     ax = fig.add_subplot()
     ax.set(xlim=(-1., 1.), ylim=(-1., 1.), autoscale_on=False, aspect='equal')
-    # ax.set_xlim(-1, 1)
-    # ax.set_ylim(-1, 1)
-    # ax.axis('equal')
     plt.close(fig)
     for i in range(args.trial_num):
         # dist, std_true, std_pred, prior_std = visualize_flow(env, model, dist_type='L2', title=args.flow_path)
         if args.use_data:
-            dist, std_true, std_pred, prior_std, artists = visualize_flow_from_data(train_data_tuple, model,
+            dist, std_true, std_pred, prior_std, artists = visualize_flow_from_data(val_data_tuple, model,
                                                                                     device=args.device,
                                                                                     dist_type=args.dist_metric,
                                                                                     test_num=args.test_num,
@@ -594,8 +587,8 @@ if __name__ == "__main__":
         # input("?")
     average_dist = np.array(dist_list).mean()
     print(f"Average Distance over {args.trial_num} tests: {average_dist}")
-    ani = animation.ArtistAnimation(fig, ims, interval=3000, repeat_delay=0)
-    if not os.path.exists('../data/gif'):
-        os.makedirs('../data/gif')
-    ani.save(f'../data/gif/{args.flow_name}.gif', writer='pillow')
-    print(f"visualization result saved to data/gif/{args.flow_name}.gif.")
+    ani = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=0)
+    if not os.path.exists(os.path.join(PROJ_PATH, "data", "gif")):
+        os.makedirs(os.path.join(PROJ_PATH, "data", "gif"))
+    ani.save(os.path.join(PROJ_PATH, "data", "gif", args.flow_name+".gif"), writer='pillow')
+    print(f"visualization result saved to {os.path.join(PROJ_PATH, 'data', 'gif', args.flow_name+'.gif')}")

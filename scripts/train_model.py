@@ -4,10 +4,13 @@ import os
 import time
 import ipdb
 
+# os.environ["CUDA_AVAILABLE_DEVICES"] = '1'
+
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
+import matplotlib
+import matplotlib.pyplot as plt
 from torch import autograd
 from torch.utils.data import DataLoader, IterableDataset
 import torch.nn.functional as F
@@ -15,10 +18,9 @@ from torch import nn
 
 from flow_mpc import flows
 from flow_mpc import utils
-from flow_mpc.environments import DoubleIntegratorEnv
-from flow_mpc.environments import NavigationObstacle
-
-from dm_control.composer import Environment
+# from flow_mpc.environments import DoubleIntegratorEnv
+# from flow_mpc.environments import NavigationObstacle
+# from dm_control.composer import Environment
 
 from visualise_flow_training import visualize_flow, visualize_flow_mujoco, visualize_flow_from_data
 from visualize_rope_2d_training import visualize_rope_2d_from_data
@@ -26,10 +28,13 @@ from dataset import TrajectoryDataset, TrajectoryImageDataset
 
 np.random.seed(0)
 torch.manual_seed(0)
+matplotlib.use('Agg')
+
+PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', type=int, default=2**8)
+    parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print-epochs', type=int, default=20)
     parser.add_argument('--condition-prior', type=bool, default=False)
@@ -43,40 +48,27 @@ def parse_arguments():
     parser.add_argument('--contact-dim', type=int, default=1, help="enable latent space classification / the contact dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
+    parser.add_argument('--weight-decay', type=float, default=1e-3)
     parser.add_argument('--hidden-dim', type=int, default=256)
-    parser.add_argument('--flow-length', type=int, default=0)
-    # parser.add_argument('--use-true-grad', action='store_true')
-    parser.add_argument('--device', type=str, default='cuda:0')
-    # parser.add_argument('--multi-gpu', action='store_true')
-    # parser.add_argument('--logging', action='store_true')
-    # parser.add_argument('--name', type=str, required=True)
-    # parser.add_argument('--use-vae', action='store_true')
-    parser.add_argument('--data-file', type=str, default="../data/training_traj/full_disk_2d_with_contact_env_1/full_disk_2d_with_contact_env_1.npz", help="training data")
-    parser.add_argument('--checkpoint', type=str, default=None)
+    parser.add_argument('--flow-length', type=int, default=10)
+    parser.add_argument('--device', type=str, default='cuda:2')
+    parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
+    parser.add_argument('--checkpoint', type=str, default=None, help="checkpoint file and its parent folder, eg: 'test_model/test_model_20.pt' ")
     parser.add_argument('--last-epoch', type=int, default=0)
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_mul_scale_10086', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='unconditional ar flow with enhanced latent classifier', help="any additional information")
-    # parser.add_argument('--vae-flow-prior', action='store_true')
-    # parser.add_argument('--supervised', action='store_true')
-    # parser.add_argument('--load-vae', type=str, default=None)
-    # parser.add_argument('--vae-training-epochs', type=int, default=100)
-    # parser.add_argument('--env', type=str,
-    #                     choices=['double_integrator_2d', 'double_integrator_3d', 'quadcopter_2d', 'quadcopter_3d',
-    #                              'quadcopter_2d_dynamic', 'quadcopter_3d_dynamic',
-    #                              'dubins_car', 'victor_tabletop'],
-    #                     default='double_integrator_2d')
+    parser.add_argument('--name', type=str, default='disk_unconditional_autoregressive_6', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='loss ratio 1:1, with data balancing', help="any additional information")
 
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
         print(f"{arg}: {value}")
-    if not os.path.exists("../data/flow_model/" + args.name):
-        os.makedirs("../data/flow_model/" + args.name)
-    with open("../data/flow_model/" + args.name + "/args.txt", 'w') as f:
+    if not os.path.exists(os.path.join(PROJ_PATH, "data", "flow_model", args.name)):
+        os.makedirs(os.path.join(PROJ_PATH, "data", "flow_model", args.name))
+    with open(os.path.join(PROJ_PATH, "data", "flow_model", args.name, "args.json"), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
     return args
 
@@ -85,6 +77,7 @@ def train_model(model, dataloader, args, backprop=True):
     tik = t0
     losses = []
     contact_prediction_accuracy = []
+    traj_prediction_error = []
     for data in dataloader:
         t1 = time.time()
         # Without image
@@ -94,7 +87,6 @@ def train_model(model, dataloader, args, backprop=True):
             traj = traj.reshape(-1, *traj.shape[-2:]).to(args.device)
             action = action.reshape(-1, *action.shape[-2:]).to(args.device)
             t2 = time.time()
-            # ipdb.set_trace()
             z, log_prob = model(start_state, action, reverse=True, traj=traj)
             t3 = time.time()
             loss = -log_prob.mean()
@@ -113,17 +105,23 @@ def train_model(model, dataloader, args, backprop=True):
             # image = image.unsqueeze(1).repeat(1, N, 1, 1, 1)
             image = image.reshape(-1, *image.shape[-3:]).to(args.device)
             t2 = time.time()
-            model_return = model(start_state, action, image, reconstruct=False, reverse=True, traj=traj, contact_flag=contact_flag)
-            z, log_prob, image_reconstruct = model_return[0], model_return[1], model_return[2]
-            loss1 = -log_prob.mean()
+            train_return = model(start_state, action, image, reconstruct=False, reverse=True, traj=traj, contact_flag=contact_flag)
+            z, log_prob, image_reconstruct = train_return["z"], train_return["logp"], train_return["image_reconstruct"]
+            # loss1 = -log_prob.mean()
+            weight = F.softmax(contact_flag.sum(dim=1)/args.horizon, dim=0) if contact_flag is not None else torch.ones_like(log_prob)/len(log_prob)
+            loss1 = -weight @ log_prob
             # loss2 = nn.functional.mse_loss(image_reconstruct, image)
             # loss = -log_prob.mean() + 1000*nn.functional.mse_loss(image_reconstruct, image)
             loss3 = 0
-            if args.contact_dim is not None:
-                pred_contact_score = model_return[3]
+            if "contact_logit" in train_return and train_return["contact_logit"] is not None:
+                pred_contact_score = train_return["contact_logit"]
                 loss3 = F.binary_cross_entropy_with_logits(pred_contact_score, contact_flag)
                 contact_prediction_accuracy.append(((pred_contact_score > 0) == contact_flag).float().mean().item())
-            loss = loss1 + 5*loss3
+            loss = loss1 + loss3
+            with torch.no_grad():
+                pred_return = model(start_state, action, image, reconstruct=False, reverse=False)
+                dist = utils.calc_traj_dist(pred_return["traj"], traj, metric=args.dist_metric)
+                traj_prediction_error.append(dist)
             t3 = time.time()
         losses.append(loss.item())
         if backprop:
@@ -136,6 +134,7 @@ def train_model(model, dataloader, args, backprop=True):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
         t4 = time.time()
         tt = np.array([t0, t1, t2, t3, t4])
         dt = tt[1:]-tt[:-1]
@@ -143,9 +142,9 @@ def train_model(model, dataloader, args, backprop=True):
         # print(f"sample batch: {dt[0]:.1f}% | move to cuda: {dt[1]:.1f}% | forward propagation: {dt[2]:.1f}% | back propagation: {dt[3]:.1f}%")
         t0 = time.time()
     tok = time.time()
-    info = {'loss': sum(losses)/len(losses), 'time': tok-tik}
+    info = {'loss': sum(losses)/len(losses), 'time': tok-tik, 'traj_error': sum(traj_prediction_error)/len(traj_prediction_error)}
     if len(contact_prediction_accuracy) > 0:
-        info['contact_prediction_accuracy'] = sum(contact_prediction_accuracy) / len(contact_prediction_accuracy)
+        info['contact_acc'] = sum(contact_prediction_accuracy) / len(contact_prediction_accuracy)
     # print(f"train one epoch: {tok-tik} sec.")
     return info
 
@@ -191,10 +190,11 @@ def eval_model(model, dataloader, args):
 #     model.train()
 #     return sum(loss)/len(loss)
 if __name__ == "__main__":
-    # visualize_fn = visualize_flow_mujoco
     args = parse_arguments()
-    writer = SummaryWriter(log_dir="runs/" + args.name)
-    data_dict = dict(np.load(args.data_file))
+    writer = SummaryWriter(log_dir=os.path.join(PROJ_PATH, "scripts", "runs", args.name))
+
+    # data
+    data_dict = dict(np.load(os.path.join(PROJ_PATH, "data", "training_traj", args.data_file, args.data_file+".npz")))
     state_mean = data_dict['states'].mean((0, 1, 2))
     state_std = data_dict['states'].std((0, 1, 2))
     action_mean = data_dict['U'].mean((0, 1, 2))
@@ -211,16 +211,21 @@ if __name__ == "__main__":
     del data_list
     # train_data_tuple = tuple(data_dict.values())
     # val_data_tuple = tuple(data_dict.values())
+    num_worker = 0
     if not args.with_image:
-        train_dataloader = DataLoader(TrajectoryDataset(train_data_tuple, args.horizon), batch_size=args.batch_size, shuffle=True, num_workers=8)
-        validate_dataloader = DataLoader(TrajectoryDataset(val_data_tuple, args.horizon), batch_size=args.batch_size, shuffle=True, num_workers=8)
+        train_dataloader = DataLoader(TrajectoryDataset(train_data_tuple, args.horizon), batch_size=args.batch_size, shuffle=True, num_workers=num_worker)
+        validate_dataloader = DataLoader(TrajectoryDataset(val_data_tuple, args.horizon), batch_size=args.batch_size, shuffle=True, num_workers=num_worker)
     else:
         train_dataloader = DataLoader(TrajectoryImageDataset(train_data_tuple, args.horizon, with_contact=args.with_contact), batch_size=args.batch_size,
-                                      shuffle=True, num_workers=8)
+                                      shuffle=True, num_workers=num_worker)
         validate_dataloader = DataLoader(TrajectoryImageDataset(val_data_tuple, args.horizon, with_contact=args.with_contact), batch_size=args.batch_size,
-                                         shuffle=True, num_workers=8)
+                                         shuffle=True, num_workers=num_worker)
+    args.contact_ratio = train_dataloader.dataset.contact_flag.sum()/train_dataloader.dataset.contact_flag.numel()
+    print(f"contact flag ratio: {args.contact_ratio.item()}")
     del train_data_tuple
     # del val_data_tuple
+
+    # model
     if not args.double_flow:
         if not args.with_image:
             model = flows.FlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, hidden_dim=args.hidden_dim,
@@ -241,43 +246,54 @@ if __name__ == "__main__":
     model.to(args.device)
     model.train()
     print(f"The number of the model's trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     if args.checkpoint is not None:
-        path = f'../data/flow_model/{args.checkpoint}/{args.checkpoint}.pt'
+        path = os.path.join(PROJ_PATH, "data", "flow_model", args.checkpoint)
         utils.load_checkpoint(model, optimizer, path, args.device)
-    # env = DoubleIntegratorEnv(world_dim=2, world_type='spheres', dt=0.05, action_noise_cov=args.action_noise*np.eye(2))
-    env = Environment(NavigationObstacle(process_noise=args.process_noise, action_noise=args.action_noise), max_reset_attempts=2)
-    # visualize_fn(env, model, horizon=args.horizon, dist_type=args.dist_metric, title=args.name)
+
+    # train
     best_dist = np.inf
+    best_epoch = None
     for epoch in range(args.last_epoch, args.epochs):
         train_info = train_model(model, train_dataloader, args)
         writer.add_scalar('epoch/train loss', train_info['loss'], epoch)
-        contact_pred_acc = train_info['contact_prediction_accuracy'] if 'contact_prediction_accuracy' in train_info.keys() else 0
-        print(f"epoch: {epoch} | loss: {train_info['loss']} | contact pred acc: {100*contact_pred_acc:.1f}% | time: {train_info['time']:.1f} sec. ")
+        writer.add_scalar('epoch/train traj error', train_info['traj_error'], epoch)
+        train_contact_acc = train_info['contact_acc'] if 'contact_acc' in train_info else 0
+        writer.add_scalar('epoch/train contact acc', train_contact_acc, epoch)
+        print(f"epoch: {epoch} | loss: {train_info['loss']:.3g} | traj error: {train_info['traj_error']:.3f} | contact pred acc: {100*train_contact_acc:.1f}% | time: {train_info['time']:.1f} sec.")
         if epoch % args.print_epochs == 0:
             # dist, std_true, std_pred, prior_std = visualize_fn(env, model, horizon=args.horizon, dist_type=args.dist_metric, title=args.name)
-            if "disk" in args.name:
-                dist, std_true, std_pred, prior_std = visualize_flow_from_data(data=val_data_tuple, flow=model, device=args.device,
-                                                                               dist_type=args.dist_metric, horizon=args.horizon,
-                                                                               with_contact=args.with_contact, with_image=args.with_image)
-            elif "rope" in args.name:
-                dist, std_true, std_pred, prior_std = visualize_rope_2d_from_data(data=val_data_tuple, flow=model, device=args.device,
-                                                                                  dist_type=args.dist_metric, horizon=args.horizon)
-            prior_std = prior_std.mean()
+            # if "disk" in args.name:
+            #     dist, std_true, std_pred, prior_std = visualize_flow_from_data(data=val_data_tuple, flow=model, device=args.device,
+            #                                                                    dist_type=args.dist_metric, horizon=args.horizon,
+            #                                                                    with_contact=args.with_contact, with_image=args.with_image)
+            # elif "rope" in args.name:
+            #     dist, std_true, std_pred, prior_std = visualize_rope_2d_from_data(data=val_data_tuple, flow=model, device=args.device,
+            #                                                                       dist_type=args.dist_metric, horizon=args.horizon)
+            # prior_std = prior_std.mean()
             eval_info = eval_model(model, validate_dataloader, args)
-            writer.add_scalar('epoch/trajectory prediction error', dist, epoch)
-            writer.add_scalar('epoch/true traj std', std_true, epoch)
-            writer.add_scalar('epoch/pred traj std', std_pred, epoch)
-            writer.add_scalar('epoch/prior log std', prior_std, epoch)
-            if 'contact_prediction_accuracy' in eval_info.keys():
-                writer.add_scalar('epoch/contact prediction accuracy', eval_info['contact_prediction_accuracy'], epoch)
+            test_contact_acc = eval_info['contact_acc'] if 'contact_acc' in eval_info else 0
+            dist = eval_info['traj_error']
+            # writer.add_scalar('epoch/trajectory prediction error', dist, epoch)
+            # writer.add_scalar('epoch/true traj std', std_true, epoch)
+            # writer.add_scalar('epoch/pred traj std', std_pred, epoch)
+            # writer.add_scalar('epoch/prior log std', prior_std, epoch)
+            # if 'contact_acc' in eval_info.keys():
+            #     writer.add_scalar('epoch/contact prediction accuracy', eval_info['contact_acc'], epoch)
             writer.add_scalar('epoch/test loss', eval_info['loss'], epoch)
+            writer.add_scalar('epoch/test traj_error', eval_info['traj_error'], epoch)
+            writer.add_scalar('epoch/test contact acc', test_contact_acc, epoch)
             print(f"epoch: {epoch} | test loss: {eval_info['loss']:.3g} | train loss: {train_info['loss']:.3g} "
-                  + f"| contact pred acc: {100*contact_pred_acc:.1f}% "
-                  + f"| traj prediction error: {dist:.3g} | true traj std: {std_true} | pred traj std: {std_pred} | prior log std: {prior_std}")
-            utils.save_checkpoint(model, optimizer, f"../data/flow_model/{args.name}/{args.name}.pt")
+                  + f"| contact pred acc: {100*test_contact_acc:.1f}% "
+                  + f"| traj prediction error: {dist:.3g}")
+            utils.save_checkpoint(model, optimizer, os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"))
             if dist < best_dist:
+                if best_epoch is not None:
+                    os.rename(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}_best.pt"),
+                                os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}.pt"))
+                os.rename(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"),
+                            os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}_best.pt"))
                 best_dist = dist
-                utils.save_checkpoint(model, optimizer, f"../data/flow_model/{args.name}/{args.name}_best.pt")
+                best_epoch = epoch
     writer.close()
     # ipdb.set_trace()
