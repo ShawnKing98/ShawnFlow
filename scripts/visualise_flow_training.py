@@ -35,9 +35,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_unconditional_autoregressive_2")
+    parser.add_argument('--flow-name', type=str, default="disk_2d_msar_no_contact")
     parser.add_argument('--use-data', type=bool, default=True)
-    # parser.add_argument('--action-noise', type=float, default=0.1)
+    # parser.add_argument('--action-noise', type=float, default=0.1)disk_2d_free_1
     # parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--world-dim', type=int, default=2)
     parser.add_argument('--control-dim', type=int, default=2)
@@ -50,7 +50,7 @@ def parse_args():
         if model_file[-7:-3] == "best":
             args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, model_file)
             break
-    args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_8000.pt")
+    # args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_8000.pt")
     with open(os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, "args.json")) as f:
         stored_args = f.read()
     stored_args = json.loads(stored_args)
@@ -105,7 +105,9 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
     if image is not None:
         if gif_fig is not None:
             image_box = OffsetImage(1-image, cmap='gray', zoom=1.707)
-            artists.append(gif_fig.axes[0].add_artist(AnnotationBbox(image_box, (0, 0), zorder=-2, pad=99)))
+            annotation_box = AnnotationBbox(image_box, (0, 0), pad=99)
+            annotation_box.set_zorder(-2)
+            artists.append(gif_fig.axes[0].add_artist(annotation_box))
         image = torch.tensor(image, device=device, dtype=torch.float).unsqueeze(0).unsqueeze(0)
 
 

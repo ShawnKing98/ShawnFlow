@@ -45,22 +45,22 @@ def parse_arguments():
     parser.add_argument('--double-flow', type=bool, default=False, help="whether to enable double flow architecture")
     parser.add_argument('--with-contact', type=bool, default=True)
     parser.add_argument('--pre-rotation', type=bool, default=False)
-    parser.add_argument('--contact-dim', type=int, default=1, help="enable latent space classification / the contact dimension at one timestamp")
+    parser.add_argument('--contact-dim', type=int, default=0, help="enable latent space classification / the contact dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--weight-decay', type=float, default=1e-3)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--flow-length', type=int, default=10)
-    parser.add_argument('--device', type=str, default='cuda:2')
+    parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
     parser.add_argument('--checkpoint', type=str, default=None, help="checkpoint file and its parent folder, eg: 'test_model/test_model_20.pt' ")
     parser.add_argument('--last-epoch', type=int, default=0)
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
-    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
+    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='msar')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_unconditional_autoregressive_6', help="name of this trial")
+    parser.add_argument('--name', type=str, default='disk_2d_msar_no_contact_test', help="name of this trial")
     parser.add_argument('--remark', type=str, default='loss ratio 1:1, with data balancing', help="any additional information")
 
     args = parser.parse_args()
@@ -90,6 +90,10 @@ def train_model(model, dataloader, args, backprop=True):
             z, log_prob = model(start_state, action, reverse=True, traj=traj)
             t3 = time.time()
             loss = -log_prob.mean()
+            with torch.no_grad():
+                pred_traj, pred_log_prob = model(start_state, action, reverse=False)
+                dist = utils.calc_traj_dist(pred_traj, traj, metric=args.dist_metric)
+                traj_prediction_error.append(dist)
         # With image
         else:
             if len(data) == 4:
@@ -220,8 +224,8 @@ if __name__ == "__main__":
                                       shuffle=True, num_workers=num_worker)
         validate_dataloader = DataLoader(TrajectoryImageDataset(val_data_tuple, args.horizon, with_contact=args.with_contact), batch_size=args.batch_size,
                                          shuffle=True, num_workers=num_worker)
-    args.contact_ratio = train_dataloader.dataset.contact_flag.sum()/train_dataloader.dataset.contact_flag.numel()
-    print(f"contact flag ratio: {args.contact_ratio.item()}")
+    args.contact_ratio = train_dataloader.dataset.contact_flag.sum()/train_dataloader.dataset.contact_flag.numel() if train_dataloader.dataset.contact_flag is not None else None
+    print(f"contact flag ratio: {args.contact_ratio}")
     del train_data_tuple
     # del val_data_tuple
 
@@ -287,10 +291,13 @@ if __name__ == "__main__":
                   + f"| contact pred acc: {100*test_contact_acc:.1f}% "
                   + f"| traj prediction error: {dist:.3g}")
             utils.save_checkpoint(model, optimizer, os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"))
+            if os.path.exists(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch-args.print_epochs}.pt")):
+                os.remove(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch-args.print_epochs}.pt"))
             if dist < best_dist:
                 if best_epoch is not None:
-                    os.rename(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}_best.pt"),
-                                os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}.pt"))
+                    os.remove(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}_best.pt"))
+                    # os.rename(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}_best.pt"),
+                    #             os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}.pt"))
                 os.rename(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"),
                             os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}_best.pt"))
                 best_dist = dist

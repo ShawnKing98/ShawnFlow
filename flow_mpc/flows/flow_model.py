@@ -279,7 +279,7 @@ class FlowModel(nn.Module):
             relative_displacement = x.reshape(batch_size, -1, self.state_dim)
             traj = start_state.unsqueeze(1) + torch.cumsum(relative_displacement, dim=1)
             traj = traj * self.state_std + self.state_mean
-            return traj, log_prob + ldj
+            return {"traj": traj, "logp": log_prob + ldj}
         else:           # training
             noise_magnitude = torch.rand((batch_size, 1), dtype=context.dtype, device=context.device) * 2 - 1  # (-1, 1)
             context = torch.cat((context, noise_magnitude), dim=1)
@@ -292,7 +292,7 @@ class FlowModel(nn.Module):
             z, ldj = self.flow(x, logpx=0, context=context, reverse=reverse)
             # z, ldj = x, 0
             z, log_prob = self.prior(z=z, logpx=ldj, context=context, reverse=reverse)
-            return z, log_prob
+            return {"z": z, "logp": log_prob}
 
 class ImageFlowModel(nn.Module):
     """The dynamics model based on normalizing flow, along with an extra encoder to encode environment image"""
