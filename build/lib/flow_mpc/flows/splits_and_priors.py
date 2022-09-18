@@ -206,6 +206,8 @@ class ConditionalSplitFlow(nn.Module):
         if self.context_mask is not None:
             context = context[:, self.context_mask.bool()]
         inpt = torch.cat((z[:, :self.z_dim-self.z_split_dim], context), dim=1)
+        # print("mean:", inpt.mean())
+        # print("std:", inpt.std())
         # z_split_mu, z_split_std = torch.chunk(self.fc2(self.act_fn(self.fc1(inpt))), chunks=2, dim=1)
         z_split_mu, z_split_std = torch.chunk(self.fc(inpt), chunks=2, dim=1)
         z_split_std = torch.sigmoid(z_split_std) + 1e-7
