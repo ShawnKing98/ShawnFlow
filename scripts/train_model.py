@@ -37,7 +37,7 @@ def parse_arguments():
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print-epochs', type=int, default=20)
-    parser.add_argument('--condition-prior', type=bool, default=False)
+    parser.add_argument('--condition-prior', type=bool, default=True)
     parser.add_argument('--with-image', type=bool, default=True)
     parser.add_argument('--state-dim', type=int, default=4)
     parser.add_argument('--control-dim', type=int, default=2)
@@ -48,20 +48,21 @@ def parse_arguments():
     parser.add_argument('--contact-dim', type=int, default=0, help="enable latent space classification / the contact dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
-    parser.add_argument('--weight-decay', type=float, default=1e-3)
-    parser.add_argument('--hidden-dim', type=int, default=256)
+    parser.add_argument('--weight-decay', type=float, default=1e-4)
+    parser.add_argument('--hidden-dim', type=int, default=32)
     parser.add_argument('--flow-length', type=int, default=10)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
+    parser.add_argument('--prior-name', type=str, default="disk_2d_free_gaussian", help="the name of the pre-trained conditional prior")
     parser.add_argument('--checkpoint', type=str, default=None, help="checkpoint file and its parent folder, eg: 'test_model/test_model_20.pt' ")
     parser.add_argument('--last-epoch', type=int, default=0)
     parser.add_argument('--action-noise', type=float, default=0.1)
     parser.add_argument('--process-noise', type=float, default=0.000)
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
-    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='msar')
+    parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_msar_no_contact_test', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='loss ratio 1:1, with data balancing', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_2d_ar_prior_pretrain_3', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space', help="any additional information")
 
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
@@ -87,12 +88,12 @@ def train_model(model, dataloader, args, backprop=True):
             traj = traj.reshape(-1, *traj.shape[-2:]).to(args.device)
             action = action.reshape(-1, *action.shape[-2:]).to(args.device)
             t2 = time.time()
-            z, log_prob = model(start_state, action, reverse=True, traj=traj)
+            train_return = model(start_state, action, reverse=True, traj=traj)
             t3 = time.time()
-            loss = -log_prob.mean()
+            loss = -train_return["logp"].mean()
             with torch.no_grad():
-                pred_traj, pred_log_prob = model(start_state, action, reverse=False)
-                dist = utils.calc_traj_dist(pred_traj, traj, metric=args.dist_metric)
+                pred_return = model(start_state, action, reverse=False)
+                dist = utils.calc_traj_dist(pred_return["traj"], traj, metric=args.dist_metric)
                 traj_prediction_error.append(dist)
         # With image
         else:
@@ -240,13 +241,27 @@ if __name__ == "__main__":
                                          hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
                                          state_mean=state_mean, state_std=state_std, action_mean=action_mean, action_std=action_std,
                                          image_mean=image_mean, image_std=image_std, flow_mean=state_mean, flow_std=state_std,
-                                         flow_type=args.flow_type, with_contact=False, env_dim=args.env_dim,
+                                         flow_type=args.flow_type, with_contact=False, env_dim=args.env_dim, prior_pretrain=(args.prior_name is not None),
                                          contact_dim=args.contact_dim, pre_rotation=args.pre_rotation).float()
     else:
         model = flows.DoubleImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                            hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
                                            state_mean=state_mean, state_std=state_std, action_mean=action_mean, action_std=action_std,
                                            image_mean=image_mean, image_std=image_std, flow_type=args.flow_type, env_dim=args.env_dim).float()
+    if args.prior_name is not None:
+        with open(os.path.join(PROJ_PATH, "data", "flow_model", args.prior_name, "args.json")) as f:
+            prior_args = f.read()
+        prior_args = json.loads(prior_args)
+        prior_model = flows.FlowModel(state_dim=prior_args["state_dim"], action_dim=prior_args["control_dim"], horizon=prior_args["horizon"], hidden_dim=prior_args["hidden_dim"],
+                                    condition=prior_args["condition_prior"], flow_length=prior_args["flow_length"], flow_type=prior_args["flow_type"]).float().to(args.device)
+        for prior_model_file in os.listdir(os.path.join(PROJ_PATH, "data", "flow_model", args.prior_name)):
+            if prior_model_file[-7:-3] == "best":
+                prior_path = os.path.join(PROJ_PATH, "data", "flow_model", args.prior_name, prior_model_file)
+                break
+        utils.load_checkpoint(prior_model, filename=prior_path, device=args.device)
+        model.prior = prior_model.prior
+        for p in model.prior.parameters():
+            p.requires_grad = False
     model.to(args.device)
     model.train()
     print(f"The number of the model's trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
@@ -256,7 +271,7 @@ if __name__ == "__main__":
         utils.load_checkpoint(model, optimizer, path, args.device)
 
     # train
-    best_dist = np.inf
+    min_test_loss = np.inf
     best_epoch = None
     for epoch in range(args.last_epoch, args.epochs):
         train_info = train_model(model, train_dataloader, args)
@@ -293,14 +308,14 @@ if __name__ == "__main__":
             utils.save_checkpoint(model, optimizer, os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"))
             if os.path.exists(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch-args.print_epochs}.pt")):
                 os.remove(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch-args.print_epochs}.pt"))
-            if dist < best_dist:
+            if eval_info['loss'] < min_test_loss:
                 if best_epoch is not None:
                     os.remove(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}_best.pt"))
                     # os.rename(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}_best.pt"),
                     #             os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{best_epoch}.pt"))
                 os.rename(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"),
                             os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}_best.pt"))
-                best_dist = dist
+                min_test_loss = eval_info['loss']
                 best_epoch = epoch
     writer.close()
     # ipdb.set_trace()

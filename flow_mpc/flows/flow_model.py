@@ -299,7 +299,7 @@ class ImageFlowModel(nn.Module):
     def __init__(self, state_dim, action_dim, horizon, image_size: Tuple[int, int],
                  env_dim=64, hidden_dim=256, flow_length=10, condition=True, initialized=False,
                  flow_type='autoregressive', with_contact=False, relative_displacement=True,
-                 contact_dim=0, pre_rotation=False,
+                 contact_dim=0, pre_rotation=False, prior_pretrain=False,
                  state_mean=None, state_std=None,
                  action_mean=None, action_std=None,
                  image_mean=None, image_std=None,
@@ -324,6 +324,7 @@ class ImageFlowModel(nn.Module):
         self.env_dim = env_dim
         self.relative_displacement = relative_displacement
         self.pre_rotation = pre_rotation
+        self.prior_pretrain = prior_pretrain
         self.register_buffer('state_mean', torch.tensor(state_mean, dtype=torch.float) if state_mean is not None else torch.zeros(state_dim))
         self.register_buffer('state_std', torch.tensor(state_std, dtype=torch.float) if state_std is not None else torch.ones(state_dim))
         self.register_buffer('action_mean', torch.tensor(action_mean, dtype=torch.float) if action_mean is not None else torch.zeros(action_dim))
@@ -352,18 +353,22 @@ class ImageFlowModel(nn.Module):
         else:
             raise NotImplementedError(f"flow type {flow_type} not recognizable.")
         initial_horizon = 1 if flow_type == 'msar' else horizon
-        if condition:
-            context_order = torch.cat((
-                torch.zeros(state_dim),  # start state
-                torch.arange(horizon).repeat(action_dim, 1).T.reshape(-1),  # action sequence
-                torch.zeros(env_dim),  # environment code
-                torch.zeros(1)  # noise magnitude
-            ))
-            self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon + env_dim + 1,
-                                                state_dim * initial_horizon, hidden_dim=hidden_dim,
-                                                context_order=context_order)
+        if self.prior_pretrain:
+            self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon + 1,
+                                                state_dim * initial_horizon, hidden_dim=hidden_dim)
         else:
-            self.prior = flows.GaussianPrior(state_dim * initial_horizon)
+            if condition:
+                context_order = torch.cat((
+                    torch.zeros(state_dim),  # start state
+                    torch.arange(horizon).repeat(action_dim, 1).T.reshape(-1),  # action sequence
+                    torch.zeros(env_dim),  # environment code
+                    torch.zeros(1)  # noise magnitude
+                ))
+                self.prior = flows.ConditionalPrior(state_dim + action_dim * horizon + env_dim + 1,
+                                                    state_dim * initial_horizon, hidden_dim=hidden_dim,
+                                                    context_order=context_order)
+            else:
+                self.prior = flows.GaussianPrior(state_dim * initial_horizon)
 
         self.encoder = Encoder(image_size, env_dim)
         # self.s_u_encoder = nn.Sequential(nn.Linear(state_dim + action_dim * horizon, hidden_dim),
@@ -416,7 +421,8 @@ class ImageFlowModel(nn.Module):
         if not reverse:     # sampling
             noise_magnitude = basic_context.new_zeros(batch_size, 1)
             context = torch.cat((basic_context, noise_magnitude), dim=1)
-            z, log_prob = self.prior(z=z, logpx=0, context=context, reverse=reverse)
+            prior_context = context if not self.prior_pretrain else torch.cat((start_state, action.reshape(batch_size, -1), noise_magnitude), dim=1)
+            z, log_prob = self.prior(z=z, logpx=0, context=prior_context, reverse=reverse)
             contact_prediction_score = None
             if hasattr(self, "latent_classifier"):
                 contact_prediction_score = self.latent_classifier(torch.cat((z, basic_context), dim=1))
@@ -453,7 +459,9 @@ class ImageFlowModel(nn.Module):
                 x = traj.reshape(batch_size, -1)
             z, ldj = self.flow(x, logpx=0, context=context, reverse=reverse)
             # z, ldj = x, 0
-            z, log_prob = self.prior(z=z, logpx=ldj, context=torch.cat((basic_context, noise_magnitude), dim=1), reverse=reverse)
+            prior_context = torch.cat((basic_context, noise_magnitude), dim=1) if not self.prior_pretrain \
+                else torch.cat((start_state, action.reshape(batch_size, -1), noise_magnitude), dim=1)
+            z, log_prob = self.prior(z=z, logpx=ldj, context=prior_context, reverse=reverse)
             contact_prediction_score = self.latent_classifier(torch.cat((z, basic_context), dim=1)) if hasattr(self, "latent_classifier") else None
             return {"z": z, "logp": log_prob, "image_reconstruct": image_reconstruct, "contact_logit": contact_prediction_score}
 

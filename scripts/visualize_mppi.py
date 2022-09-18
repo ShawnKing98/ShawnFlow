@@ -54,11 +54,11 @@ class FlowCostFunction:
     """
     A cost function that uses flow model to predict the future and encourages the robot to move towards the goal
     """
-    def __init__(self, flow: torch.nn.Module, goal=None, Q=(10, 10, 0., 0.), R=(0., 0.), env_image=None, test_num: int = 10, device="cuda"):
+    def __init__(self, flow: torch.nn.Module, goal=None, Q=(10, 10, 0., 0.), R=(0., 0.), env_image=None, sample_num: int = 10, device="cuda"):
         self._flow = flow
         self._goal = goal
         self._env_image = env_image
-        self._test_num = test_num
+        self._sample_num = sample_num
         self._device = device
         self._Q = torch.tensor(Q, device=device, dtype=torch.float)
         self._R = torch.tensor(R, device=device, dtype=torch.float)
@@ -70,10 +70,10 @@ class FlowCostFunction:
         traj_average = x.new_zeros((action.shape[0], action.shape[1], x.shape[-1]))
 
         with torch.no_grad():
-            for _ in range(self._test_num):
+            for _ in range(self._sample_num):
                 traj, prob = self._flow(x.repeat(action.shape[0], 1), action, self._env_image)
                 traj_average += traj
-        traj_average /= self._test_num
+        traj_average /= self._sample_num
         state_goal = torch.cat((self._goal, torch.zeros_like(self._goal)))
         cost = (((traj_average - state_goal) ** 2) @ self._Q).sum(dim=-1)
         cost += ((traj_average[:, -1] - state_goal) ** 2) @ (5*self._Q)

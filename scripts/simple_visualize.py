@@ -22,7 +22,7 @@ from frechetdist import frdist
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--test-num', type=int, default=50)
+    parser.add_argument('--sample-num', type=int, default=50)
     parser.add_argument('--flow-name', type=str, default="disk_2d_image_flow")
     parser.add_argument('--data-name', type=str, default="disk_2d_variable_obstacle_noisy")
     parser.add_argument('--world-dim', type=int, default=2)

@@ -28,15 +28,16 @@ class DoubleHeadConditionalMaskedAutoregressive(nn.Module):
             self.nonlinearity = nn.ReLU(inplace=True)
         elif nonlinearity == 'Tanh':
             self.nonlinearity = nn.Tanh()
-        assert hidden_dim >= flow_dim       # hidden dim must be huge enough to convey the information needed
+        max_order = max(flow_order.max(), context_order.max()).item()
+        assert hidden_dim >= max_order-1       # hidden dim must be huge enough to convey the information needed
         context_dim = len(context_order)
         layers = [MaskLinear(flow_dim+context_dim, hidden_dim)]
         element_orders = [torch.cat((flow_order, context_order)),
-                          torch.cat([torch.randperm(flow_dim-1) for _ in range(hidden_dim//(flow_dim-1))] + [torch.randperm(hidden_dim%(flow_dim-1))]),     # to make sure every order number occurs
+                          torch.cat([torch.randperm(max_order-1) for _ in range(hidden_dim//(max_order-1))] + [torch.randperm(hidden_dim%(max_order-1))]),     # to make sure every order number occurs
                           ]
         for _ in range(hidden_layer_num-1):
             layers.append(MaskLinear(hidden_dim, hidden_dim))
-            element_orders.append(torch.cat([torch.randperm(flow_dim-1) for _ in range(hidden_dim//(flow_dim-1))] + [torch.randperm(hidden_dim%(flow_dim-1))]))
+            element_orders.append(torch.cat([torch.randperm(max_order-1) for _ in range(hidden_dim//(max_order-1))] + [torch.randperm(hidden_dim%(max_order-1))]))
         self.layers = nn.Sequential(*layers)
         # self.masks = []
         for i, layer in enumerate(layers):
@@ -63,8 +64,6 @@ class DoubleHeadConditionalMaskedAutoregressive(nn.Module):
         for i, layer in enumerate(self.layers):
             out = layer(out, getattr(self, f'mask_{i}'))
             out = self.nonlinearity(out)
-        # self.mu_layer.weight *= self.out_mask
-        # self.logvar_layer.weight *= self.out_mask
         mu = self.mu_layer(out, self.mask_out)
         logvar = self.logvar_layer(out, self.mask_out)
         return mu, logvar

@@ -33,9 +33,9 @@ PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--test-num', type=int, default=10)
+    parser.add_argument('--sample-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_2d_msar_no_contact")
+    parser.add_argument('--flow-name', type=str, default="disk_2d_ar_prior_pretrain_2")
     parser.add_argument('--use-data', type=bool, default=True)
     # parser.add_argument('--action-noise', type=float, default=0.1)disk_2d_free_1
     # parser.add_argument('--process-noise', type=float, default=0.000)
@@ -50,7 +50,7 @@ def parse_args():
         if model_file[-7:-3] == "best":
             args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, model_file)
             break
-    # args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_8000.pt")
+    args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_3500.pt")
     with open(os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, "args.json")) as f:
         stored_args = f.read()
     stored_args = json.loads(stored_args)
@@ -69,7 +69,7 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
                              flow: nn.Module,
                              device="cuda" if torch.cuda.is_available() else "cpu",
                              dist_type: str=None,
-                             test_num: int=10,
+                             sample_num: int=10,
                              horizon: int=40,
                              title=None,
                              gif_fig: matplotlib.figure.Figure=None,
@@ -82,7 +82,7 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
     :param flow: a flow model
     :param device: running device
     :param dist_type: the type of distance metric, choice of [L2, frechet, None], None stands for no calculating at all
-    :param test_num: the number of tests to be conducted in this single environment
+    :param sample_num: the number of tests to be conducted in this single environment
     :param horizon: the length of the horizon to predict
     :param title: deprecated
     :param gif_fig: the matplotlib figure object to draw figure on
@@ -133,10 +133,12 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
         # if contact_flag is not None:
         #     context = torch.cat((context, contact_flag), dim=1)
         context = torch.cat((context, context.new_zeros(context.shape[0], 1)), dim=1)
+        prior_context = torch.cat((start_tensor, action.reshape(1, -1), action.new_zeros(1, 1)), dim=1) if getattr(flow, "prior_pretrain", False) \
+            else context
         # prior_mu, prior_lower = prior.mu_lower(context)
         # prior_std = (torch.det(prior_lower) ** 2).mean(0)
         # ipdb.set_trace()
-        prior_mu, prior_std = torch.chunk(prior.fc(context), chunks=2, dim=1)
+        prior_mu, prior_std = torch.chunk(prior.fc(prior_context), chunks=2, dim=1)
         prior_std = torch.sigmoid(prior_std) + 1e-7
         prior_std = prior_std.log().mean(1).mean(0)     # the log std of a single element in the prior Gaussian, rather than the std of the whole vector
     else:
@@ -160,7 +162,7 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
 
     # draw predicted trajectory
     image_reconstruct = None
-    for i in range(test_num):
+    for i in range(sample_num):
         # ipdb.set_trace()
         with torch.no_grad():
             if isinstance(flow, FlowModel):
@@ -193,7 +195,7 @@ def visualize_flow_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
                 artists.append(gif_fig.axes[0].add_artist(AnnotationBbox(image_box, (0, 0), zorder=-1, pad=99)))
 
     # draw ground truth trajectory
-    for i in range(test_num):
+    for i in range(sample_num):
         true_traj = data[1][idx, i, 0:horizon, 0:2]
         try:
             true_contact = data[4][idx, i, 0:horizon]
@@ -264,7 +266,7 @@ def visualize_flow_mujoco(env: dm_control.composer.environment.Environment,
                           flow: nn.Module,
                           controller=None,
                           horizon: int=40,
-                          test_num: int=10,
+                          sample_num: int=10,
                           device="cuda" if torch.cuda.is_available() else "cpu",
                           dist_type: str=None,
                           title=None,
@@ -351,7 +353,7 @@ def visualize_flow_mujoco(env: dm_control.composer.environment.Environment,
     # plt.plot([-0.71, -0.71, 0.71, 0.71, -0.71], [-0.71, 0.71, 0.71, -0.71, -0.71], 'k', linewidth=2)
 
     # draw predicted trajectory
-    for i in range(test_num):
+    for i in range(sample_num):
         # ipdb.set_trace()
         with torch.no_grad():
             if isinstance(flow, FlowModel):
@@ -367,7 +369,7 @@ def visualize_flow_mujoco(env: dm_control.composer.environment.Environment,
             artists += gif_fig.axes[0].plot(pred_traj[:, 0], pred_traj[:, 1], 'c', label=label, linewidth=1, alpha=0.5)
 
     # draw ground truth trajectory
-    for i in range(test_num):
+    for i in range(sample_num):
         # env._task._robot._robot_initial_pose = (*start_position, 0)
         # env._task._robot._robot_initial_velocity = (*start_velocity, 0)
         # env.reset()
@@ -554,7 +556,7 @@ if __name__ == "__main__":
         else:
             model = ImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                    hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
-                                   initialized=True, flow_type=args.flow_type, with_contact=False,
+                                   initialized=True, flow_type=args.flow_type, with_contact=False, prior_pretrain=(args.prior_name is not None),
                                    env_dim=args.env_dim, contact_dim=args.contact_dim).float().to(args.device)
     else:
         model = DoubleImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
@@ -574,13 +576,13 @@ if __name__ == "__main__":
             dist, std_true, std_pred, prior_std, artists = visualize_flow_from_data(val_data_tuple, model,
                                                                                     device=args.device,
                                                                                     dist_type=args.dist_metric,
-                                                                                    test_num=args.test_num,
+                                                                                    sample_num=args.sample_num,
                                                                                     horizon=args.horizon,
                                                                                     title=args.flow_path, gif_fig=fig,
                                                                                     with_contact=args.with_contact,
                                                                                     with_image=args.with_image)
         else:
-            dist, std_true, std_pred, prior_std, artists = visualize_flow_mujoco(env_mujoco, model, device=args.device, controller=controller, dist_type=args.dist_metric, test_num=args.test_num, title=args.flow_path, gif_fig=fig)
+            dist, std_true, std_pred, prior_std, artists = visualize_flow_mujoco(env_mujoco, model, device=args.device, controller=controller, dist_type=args.dist_metric, sample_num=args.sample_num, title=args.flow_path, gif_fig=fig)
         ax = plt.gca()
         ims.append(artists.copy())
         dist_list.append(dist)

@@ -193,6 +193,7 @@ class RationalQuadraticSplineCouplingLayer(nn.Module):
     """
     Neural spline flow coupling layer, wrapper for the implementation
     of Durkan et al., see https://github.com/bayesiains/nsf
+    Unfinished
     """
     def __init__(
             self,

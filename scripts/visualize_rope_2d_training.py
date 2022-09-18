@@ -20,7 +20,7 @@ torch.manual_seed(seed)
 def parse_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument('--name', type=str, required=True)
-    parser.add_argument('--test-num', type=int, default=10)
+    parser.add_argument('--sample-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=30)
     parser.add_argument('--flow-name', type=str, default="rope_2d_full_1")
     parser.add_argument('--use-data', type=bool, default=True)
@@ -54,7 +54,7 @@ def visualize_rope_2d_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
                                 flow: nn.Module,
                                 device="cuda" if torch.cuda.is_available() else "cpu",
                                 dist_type: str="L2",
-                                test_num: int=10,
+                                sample_num: int=10,
                                 horizon: int=10,
                                 gif_fig: matplotlib.figure.Figure=None):
     """
@@ -64,7 +64,7 @@ def visualize_rope_2d_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
         :param flow: a flow model
         :param device: running device
         :param dist_type: the type of distance metric, choice of [L2, frechet, None], None stands for no calculating at all
-        :param test_num: the number of tests to be conducted in this single environment
+        :param sample_num: the number of tests to be conducted in this single environment
         :param horizon: the length of the horizon to predict
         :param gif_fig: the matplotlib figure object to draw figure on
         :return dist: the average distance between two sets of trajectories
@@ -138,7 +138,7 @@ def visualize_rope_2d_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
 
     # draw predicted trajectory
     # image_reconstruct = None
-    for i in range(test_num):
+    for i in range(sample_num):
         # ipdb.set_trace()
         with torch.no_grad():
             if isinstance(flow, FlowModel):
@@ -173,7 +173,7 @@ def visualize_rope_2d_from_data(data: Tuple[np.ndarray, np.ndarray, np.ndarray],
             #     artists.append(gif_fig.axes[0].add_artist(AnnotationBbox(image_box, (0, 0), zorder=-1, pad=99)))
 
     # draw ground truth trajectory
-    for i in range(test_num):
+    for i in range(sample_num):
         true_traj = data[1][idx, i, 0:horizon]
         # true_contact = data[4][idx, i, 0:horizon]
         # true_contact_state = true_traj[true_contact]
