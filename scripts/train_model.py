@@ -25,6 +25,7 @@ from flow_mpc import utils
 from visualise_flow_training import visualize_flow, visualize_flow_mujoco, visualize_flow_from_data
 from visualize_rope_2d_training import visualize_rope_2d_from_data
 from dataset import TrajectoryDataset, TrajectoryImageDataset
+from contrastive import Aligner
 
 np.random.seed(0)
 torch.manual_seed(0)
@@ -34,7 +35,7 @@ PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', type=int, default=256)
+    parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print-epochs', type=int, default=20)
     parser.add_argument('--condition-prior', type=bool, default=True)
@@ -49,11 +50,12 @@ def parse_arguments():
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--weight-decay', type=float, default=1e-4)
-    parser.add_argument('--hidden-dim', type=int, default=32)
+    parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--flow-length', type=int, default=10)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
     parser.add_argument('--prior-name', type=str, default="disk_2d_free_gaussian", help="the name of the pre-trained conditional prior")
+    parser.add_argument('--aligner-name', type=str, default="disk_2d_traj_env_aligner_2", help="the name of the aligner")
     parser.add_argument('--checkpoint', type=str, default=None, help="checkpoint file and its parent folder, eg: 'test_model/test_model_20.pt' ")
     parser.add_argument('--last-epoch', type=int, default=0)
     parser.add_argument('--action-noise', type=float, default=0.1)
@@ -61,8 +63,8 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_ar_prior_pretrain_3', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_2d_ar_prior_pretrain_alignment_3', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space, alignment loss added', help="any additional information")
 
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
@@ -122,11 +124,11 @@ def train_model(model, dataloader, args, backprop=True):
                 pred_contact_score = train_return["contact_logit"]
                 loss3 = F.binary_cross_entropy_with_logits(pred_contact_score, contact_flag)
                 contact_prediction_accuracy.append(((pred_contact_score > 0) == contact_flag).float().mean().item())
-            loss = loss1 + loss3
-            with torch.no_grad():
-                pred_return = model(start_state, action, image, reconstruct=False, reverse=False)
-                dist = utils.calc_traj_dist(pred_return["traj"], traj, metric=args.dist_metric)
-                traj_prediction_error.append(dist)
+            pred_return = model(start_state, action, image, reconstruct=False, reverse=False)
+            dist = utils.calc_traj_dist(pred_return["traj"], traj, metric=args.dist_metric)
+            traj_prediction_error.append(dist)
+            loss4 = -10*pred_return["alignment"].mean() if pred_return["alignment"] is not None else 0
+            loss = loss1 + loss3 + loss4
             t3 = time.time()
         losses.append(loss.item())
         if backprop:
@@ -231,6 +233,14 @@ if __name__ == "__main__":
     # del val_data_tuple
 
     # model
+    if args.aligner_name is not None:
+        aligner = Aligner(feature_dim=64, image_size=(128, 128), state_dim=args.state_dim, horizon=args.horizon)
+        aligner_path = os.path.join(PROJ_PATH, "data", "flow_model", args.aligner_name, f"{args.aligner_name}_9980.pt")
+        utils.load_checkpoint(aligner, filename=aligner_path, device=args.device)
+        for p in aligner.parameters():
+            p.requires_grad = False
+    else:
+        aligner = None
     if not args.double_flow:
         if not args.with_image:
             model = flows.FlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, hidden_dim=args.hidden_dim,
@@ -242,7 +252,7 @@ if __name__ == "__main__":
                                          state_mean=state_mean, state_std=state_std, action_mean=action_mean, action_std=action_std,
                                          image_mean=image_mean, image_std=image_std, flow_mean=state_mean, flow_std=state_std,
                                          flow_type=args.flow_type, with_contact=False, env_dim=args.env_dim, prior_pretrain=(args.prior_name is not None),
-                                         contact_dim=args.contact_dim, pre_rotation=args.pre_rotation).float()
+                                         contact_dim=args.contact_dim, pre_rotation=args.pre_rotation, aligner=aligner).float()
     else:
         model = flows.DoubleImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                            hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,

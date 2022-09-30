@@ -299,7 +299,7 @@ class ImageFlowModel(nn.Module):
     def __init__(self, state_dim, action_dim, horizon, image_size: Tuple[int, int],
                  env_dim=64, hidden_dim=256, flow_length=10, condition=True, initialized=False,
                  flow_type='autoregressive', with_contact=False, relative_displacement=True,
-                 contact_dim=0, pre_rotation=False, prior_pretrain=False,
+                 contact_dim=0, pre_rotation=False, prior_pretrain=False, aligner=None,
                  state_mean=None, state_std=None,
                  action_mean=None, action_std=None,
                  image_mean=None, image_std=None,
@@ -324,6 +324,7 @@ class ImageFlowModel(nn.Module):
         self.env_dim = env_dim
         self.relative_displacement = relative_displacement
         self.pre_rotation = pre_rotation
+        self.aligner = aligner
         self.prior_pretrain = prior_pretrain
         self.register_buffer('state_mean', torch.tensor(state_mean, dtype=torch.float) if state_mean is not None else torch.zeros(state_dim))
         self.register_buffer('state_std', torch.tensor(state_std, dtype=torch.float) if state_std is not None else torch.ones(state_dim))
@@ -378,6 +379,7 @@ class ImageFlowModel(nn.Module):
         # self.s_u_encoder.requires_grad_(False)
         if contact_dim > 0:
             self.latent_classifier = BinaryClassifier(state_dim*initial_horizon + state_dim + action_dim*horizon + env_dim, contact_dim*horizon, hidden_dim)
+            print("latent classifier enabled!")
 
     def forward(self, start_state: torch.Tensor, action: torch.Tensor, image: torch.Tensor, reconstruct=False, reverse=False, z=None, traj=None, contact_flag=None):
         """
@@ -437,7 +439,8 @@ class ImageFlowModel(nn.Module):
             if self.pre_rotation:
                 traj = (state_backward_rotation.unsqueeze(1) @ traj.unsqueeze(-1)).squeeze(-1)
             traj = traj * self.flow_std + self.flow_mean
-            return {"traj": traj, "logp": log_prob + ldj, "image_reconstruct": image_reconstruct, "contact_logit": contact_prediction_score}
+            alignment = self.aligner(image, traj, cross_align=False) if self.aligner is not None else None
+            return {"traj": traj, "logp": log_prob + ldj, "image_reconstruct": image_reconstruct, "contact_logit": contact_prediction_score, "alignment": alignment}
         else:           # training
             assert traj is not None
             noise_magnitude = torch.rand((batch_size, 1), dtype=basic_context.dtype, device=basic_context.device) * 2 - 1   # (-1, 1)

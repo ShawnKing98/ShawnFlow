@@ -22,6 +22,7 @@ from flow_mpc.controllers import RandomController
 from flow_mpc.flows import *
 from flow_mpc.encoders import AttentionEncoder
 from flow_mpc import utils
+from contrastive import Aligner
 from frechetdist import frdist
 
 seed = 4
@@ -35,7 +36,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sample-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_2d_ar_prior_pretrain_2")
+    parser.add_argument('--flow-name', type=str, default="disk_2d_ar_prior_pretrain_alignment_2")
     parser.add_argument('--use-data', type=bool, default=True)
     # parser.add_argument('--action-noise', type=float, default=0.1)disk_2d_free_1
     # parser.add_argument('--process-noise', type=float, default=0.000)
@@ -50,7 +51,7 @@ def parse_args():
         if model_file[-7:-3] == "best":
             args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, model_file)
             break
-    args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_3500.pt")
+    # args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_1500.pt")
     with open(os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, "args.json")) as f:
         stored_args = f.read()
     stored_args = json.loads(stored_args)
@@ -549,6 +550,10 @@ if __name__ == "__main__":
     # random controller
     # controller = RandomController(udim=args.control_dim, urange=10, horizon=args.horizon, lower_bound=[-10, -10], upper_bound=[10, 10])
     # flow model
+    if args.aligner_name is not None:
+        aligner = Aligner(feature_dim=64, image_size=(128, 128), state_dim=args.state_dim, horizon=args.horizon)
+    else:
+        aligner = None
     if not args.double_flow:
         if not args.with_image:
             model = FlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, hidden_dim=args.hidden_dim,
@@ -557,7 +562,7 @@ if __name__ == "__main__":
             model = ImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                    hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
                                    initialized=True, flow_type=args.flow_type, with_contact=False, prior_pretrain=(args.prior_name is not None),
-                                   env_dim=args.env_dim, contact_dim=args.contact_dim).float().to(args.device)
+                                   env_dim=args.env_dim, contact_dim=args.contact_dim, aligner=aligner).float().to(args.device)
     else:
         model = DoubleImageFlowModel(state_dim=args.state_dim, action_dim=args.control_dim, horizon=args.horizon, image_size=(128, 128),
                                     hidden_dim=args.hidden_dim, condition=args.condition_prior, flow_length=args.flow_length,
