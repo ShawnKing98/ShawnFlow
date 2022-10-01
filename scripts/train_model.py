@@ -7,7 +7,7 @@ import ipdb
 
 PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJ_PATH)
-# os.environ["CUDA_AVAILABLE_DEVICES"] = '1'
+# os.environ["CUDA_AVAILABLE_DEVICES"] = '2'
 
 import numpy as np
 import torch
@@ -47,13 +47,13 @@ def parse_arguments():
     parser.add_argument('--double-flow', type=bool, default=False, help="whether to enable double flow architecture")
     parser.add_argument('--with-contact', type=bool, default=True)
     parser.add_argument('--pre-rotation', type=bool, default=False)
-    parser.add_argument('--contact-dim', type=int, default=0, help="enable latent space classification / the contact dimension at one timestamp")
+    parser.add_argument('--contact-dim', type=int, default=1, help="enable latent space classification / the contact dimension at one timestamp")
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--weight-decay', type=float, default=1e-4)
-    parser.add_argument('--hidden-dim', type=int, default=256)
+    parser.add_argument('--hidden-dim', type=int, default=32)
     parser.add_argument('--flow-length', type=int, default=10)
-    parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--device', type=str, default='cuda:1')
     parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
     parser.add_argument('--prior-name', type=str, default="disk_2d_free_gaussian", help="the name of the pre-trained conditional prior")
     parser.add_argument('--aligner-name', type=str, default=None, help="the name of the aligner")
@@ -64,8 +64,8 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_contact_ar_prior_pretrain_2', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space, sigmoid alignment loss', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_2d_latent_cls_ar_prior_pretrain_1', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space, latent classifier added', help="any additional information")
 
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
