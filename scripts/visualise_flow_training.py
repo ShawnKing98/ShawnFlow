@@ -3,6 +3,10 @@ import pathlib
 import argparse
 import json
 from typing import Tuple, List
+import sys
+
+PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJ_PATH)
 
 import dm_control.composer.environment
 import ipdb
@@ -30,13 +34,11 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 matplotlib.use('Agg')
 
-PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sample-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_2d_ar_prior_pretrain_alignment_3")
+    parser.add_argument('--flow-name', type=str, default="disk_2d_contact_ar_prior_pretrain_1")
     parser.add_argument('--use-data', type=bool, default=True)
     # parser.add_argument('--action-noise', type=float, default=0.1)disk_2d_free_1
     # parser.add_argument('--process-noise', type=float, default=0.000)
@@ -51,7 +53,7 @@ def parse_args():
         if model_file[-7:-3] == "best":
             args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, model_file)
             break
-    args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_2100.pt")
+    # args.flow_path = os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, args.flow_name+"_2100.pt")
     with open(os.path.join(PROJ_PATH, "data", "flow_model", args.flow_name, "args.json")) as f:
         stored_args = f.read()
     stored_args = json.loads(stored_args)
@@ -550,7 +552,7 @@ if __name__ == "__main__":
     # random controller
     # controller = RandomController(udim=args.control_dim, urange=10, horizon=args.horizon, lower_bound=[-10, -10], upper_bound=[10, 10])
     # flow model
-    if args.aligner_name is not None:
+    if getattr(args, "aligner_name", None) is not None:
         aligner = Aligner(feature_dim=64, image_size=(128, 128), state_dim=args.state_dim, horizon=args.horizon)
     else:
         aligner = None

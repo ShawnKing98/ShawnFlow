@@ -64,7 +64,7 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_ar_prior_pretrain_alignment_4', help="name of this trial")
+    parser.add_argument('--name', type=str, default='disk_2d_contact_ar_prior_pretrain_2', help="name of this trial")
     parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space, sigmoid alignment loss', help="any additional information")
 
     args = parser.parse_args()
