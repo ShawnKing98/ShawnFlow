@@ -5,9 +5,13 @@ from torch import Tensor
 
 
 class MaskLinear(nn.Linear):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True,
-                 device=None, dtype=None, mask=None):
-        super(MaskLinear, self).__init__(in_features, out_features, bias, device, dtype)
+    # def __init__(self, in_features: int, out_features: int, bias: bool = True,
+    #              device=None, dtype=None, mask=None):
+    def __init__(self, *args, **kwargs):
+        mask = kwargs.get("mask")
+        if "mask" in kwargs:
+            del kwargs["mask"]
+        super(MaskLinear, self).__init__(*args, **kwargs)
         self.register_buffer('mask', mask)
 
     def forward(self, input: Tensor, mask: Tensor = None) -> Tensor:

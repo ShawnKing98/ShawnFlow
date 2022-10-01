@@ -1,9 +1,12 @@
 import argparse
 import json
 import os
+import sys
 import time
 import ipdb
 
+PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJ_PATH)
 # os.environ["CUDA_AVAILABLE_DEVICES"] = '1'
 
 import numpy as np
@@ -31,8 +34,6 @@ np.random.seed(0)
 torch.manual_seed(0)
 matplotlib.use('Agg')
 
-PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, default=128)
@@ -55,7 +56,7 @@ def parse_arguments():
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
     parser.add_argument('--prior-name', type=str, default="disk_2d_free_gaussian", help="the name of the pre-trained conditional prior")
-    parser.add_argument('--aligner-name', type=str, default="disk_2d_traj_env_aligner_2", help="the name of the aligner")
+    parser.add_argument('--aligner-name', type=str, default=None, help="the name of the aligner")
     parser.add_argument('--checkpoint', type=str, default=None, help="checkpoint file and its parent folder, eg: 'test_model/test_model_20.pt' ")
     parser.add_argument('--last-epoch', type=int, default=0)
     parser.add_argument('--action-noise', type=float, default=0.1)
