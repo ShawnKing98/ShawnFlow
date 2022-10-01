@@ -63,8 +63,8 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_ar_prior_pretrain_alignment_3', help="name of this trial")
-    parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space, alignment loss added', help="any additional information")
+    parser.add_argument('--name', type=str, default='disk_2d_ar_prior_pretrain_alignment_4', help="name of this trial")
+    parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space, sigmoid alignment loss', help="any additional information")
 
     args = parser.parse_args()
     for (arg, value) in args._get_kwargs():
@@ -127,7 +127,7 @@ def train_model(model, dataloader, args, backprop=True):
             pred_return = model(start_state, action, image, reconstruct=False, reverse=False)
             dist = utils.calc_traj_dist(pred_return["traj"], traj, metric=args.dist_metric)
             traj_prediction_error.append(dist)
-            loss4 = -10*pred_return["alignment"].mean() if pred_return["alignment"] is not None else 0
+            loss4 = -5*pred_return["alignment"].sigmoid().mean() if pred_return["alignment"] is not None else 0
             loss = loss1 + loss3 + loss4
             t3 = time.time()
         losses.append(loss.item())
@@ -289,7 +289,7 @@ if __name__ == "__main__":
         writer.add_scalar('epoch/train traj error', train_info['traj_error'], epoch)
         train_contact_acc = train_info['contact_acc'] if 'contact_acc' in train_info else 0
         writer.add_scalar('epoch/train contact acc', train_contact_acc, epoch)
-        print(f"epoch: {epoch} | loss: {train_info['loss']:.3g} | traj error: {train_info['traj_error']:.3f} | contact pred acc: {100*train_contact_acc:.1f}% | time: {train_info['time']:.1f} sec.")
+        print(f"epoch: {epoch} | loss: {train_info['loss']:.3g} | traj error: {train_info['traj_error']:.4f} | contact pred acc: {100*train_contact_acc:.1f}% | time: {train_info['time']:.1f} sec.")
         if epoch % args.print_epochs == 0:
             # dist, std_true, std_pred, prior_std = visualize_fn(env, model, horizon=args.horizon, dist_type=args.dist_metric, title=args.name)
             # if "disk" in args.name:
@@ -314,7 +314,7 @@ if __name__ == "__main__":
             writer.add_scalar('epoch/test contact acc', test_contact_acc, epoch)
             print(f"epoch: {epoch} | test loss: {eval_info['loss']:.3g} | train loss: {train_info['loss']:.3g} "
                   + f"| contact pred acc: {100*test_contact_acc:.1f}% "
-                  + f"| traj prediction error: {dist:.3g}")
+                  + f"| traj prediction error: {dist:.4g}")
             utils.save_checkpoint(model, optimizer, os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch}.pt"))
             if os.path.exists(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch-args.print_epochs}.pt")):
                 os.remove(os.path.join(PROJ_PATH, "data", "flow_model", args.name, f"{args.name}_{epoch-args.print_epochs}.pt"))
