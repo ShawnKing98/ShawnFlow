@@ -37,7 +37,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sample-num', type=int, default=10)
     parser.add_argument('--trial-num', type=int, default=20)
-    parser.add_argument('--flow-name', type=str, default="disk_2d_contact_ar_prior_pretrain_1")
+    parser.add_argument('--flow-name', type=str, default="disk_2d_contact_ar_prior_pretrain_2")
     parser.add_argument('--use-data', type=bool, default=True)
     # parser.add_argument('--action-noise', type=float, default=0.1)disk_2d_free_1
     # parser.add_argument('--process-noise', type=float, default=0.000)

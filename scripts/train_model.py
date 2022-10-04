@@ -3,8 +3,11 @@ import json
 import os
 import time
 import ipdb
+import sys
 
 # os.environ["CUDA_AVAILABLE_DEVICES"] = '1'
+PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJ_PATH)
 
 import numpy as np
 import torch
@@ -30,7 +33,6 @@ np.random.seed(0)
 torch.manual_seed(0)
 matplotlib.use('Agg')
 
-PROJ_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -49,9 +51,9 @@ def parse_arguments():
     parser.add_argument('--horizon', type=int, default=10)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--weight-decay', type=float, default=1e-4)
-    parser.add_argument('--hidden-dim', type=int, default=256)
+    parser.add_argument('--hidden-dim', type=int, default=32)
     parser.add_argument('--flow-length', type=int, default=10)
-    parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--device', type=str, default='cuda:3')
     parser.add_argument('--data-file', type=str, default="full_disk_2d_with_contact_env_1", help="training data")
     parser.add_argument('--prior-name', type=str, default="disk_2d_free_gaussian", help="the name of the pre-trained conditional prior")
     parser.add_argument('--checkpoint', type=str, default=None, help="checkpoint file and its parent folder, eg: 'test_model/test_model_20.pt' ")
@@ -61,7 +63,7 @@ def parse_arguments():
     parser.add_argument('--train-val-ratio', type=float, default=0.95)
     parser.add_argument('--flow-type', type=str, choices=['ffjord', 'nvp', 'otflow', 'autoregressive', 'msar'], default='autoregressive')
     parser.add_argument('--dist-metric', type=str, choices=['L2', 'frechet'], default='L2', help="the distance metric between two sets of trajectory")
-    parser.add_argument('--name', type=str, default='disk_2d_contact_ar_prior_pretrain_1', help="name of this trial")
+    parser.add_argument('--name', type=str, default='disk_2d_contact_ar_prior_pretrain_3', help="name of this trial")
     parser.add_argument('--remark', type=str, default='autoregressive with a conditional gaussian pretrained in free space, contact flags being part of flow variables', help="any additional information")
 
     args = parser.parse_args()
